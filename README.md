@@ -61,5 +61,6 @@ Open `client/index.html` directly in your browser.
 | `POST` | `/clock-in` | `{ "workerId": "string", "hotelName": "string" }` | Creates a new open shift. Returns **409** if worker already has an open shift. |
 | `POST` | `/clock-out` | `{ "workerId": "string" }` | Closes the open shift for the worker. Returns **404** if no open shift. |
 | `GET` | `/logs/:workerId` | — | Returns the full shift history array for that worker. |
+| `GET` | `/summary/:workerId` | — | Returns rollup stats: total shifts, closed shifts, total minutes/hours, and current open shift (if any). |
 
 Missing / invalid fields return **400** with a descriptive `error` message.

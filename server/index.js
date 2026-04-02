@@ -24,6 +24,34 @@ function findOpenShift(workerId) {
   return logs.find((s) => !s.clockOutAt) || null;
 }
 
+function getShiftDurationMinutes(shift) {
+  if (!shift.clockOutAt) return 0;
+
+  const start = Date.parse(shift.clockInAt);
+  const end = Date.parse(shift.clockOutAt);
+  if (Number.isNaN(start) || Number.isNaN(end)) return 0;
+
+  return Math.max(0, Math.round((end - start) / 60000));
+}
+
+function buildWorkerSummary(workerId) {
+  const logs = getWorkerLogs(workerId);
+  const closedShifts = logs.filter((shift) => shift.clockOutAt);
+  const totalMinutes = closedShifts.reduce(
+    (sum, shift) => sum + getShiftDurationMinutes(shift),
+    0
+  );
+
+  return {
+    workerId,
+    totalShifts: logs.length,
+    closedShifts: closedShifts.length,
+    openShift: findOpenShift(workerId),
+    totalMinutes,
+    totalHours: Number((totalMinutes / 60).toFixed(2)),
+  };
+}
+
 // GET /
 app.get("/", (req, res) => {
   res.type("text").send("TimeClock API running");
@@ -92,6 +120,14 @@ app.get("/logs/:workerId", (req, res) => {
 
   const logs = getWorkerLogs(wid);
   res.json(logs);
+});
+
+// GET /summary/:workerId
+app.get("/summary/:workerId", (req, res) => {
+  const wid = (req.params.workerId || "").trim();
+  if (!wid) return res.status(400).json({ error: "workerId param is required" });
+
+  res.json(buildWorkerSummary(wid));
 });
 
 app.listen(PORT, () => {

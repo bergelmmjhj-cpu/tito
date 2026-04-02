@@ -3,8 +3,10 @@ const hotelNameEl = document.getElementById("hotelName");
 const timeInBtn = document.getElementById("timeInBtn");
 const timeOutBtn = document.getElementById("timeOutBtn");
 const refreshLogsBtn = document.getElementById("refreshLogsBtn");
+const refreshSummaryBtn = document.getElementById("refreshSummaryBtn");
 const resultEl = document.getElementById("result");
 const logsEl = document.getElementById("logs");
+const summaryEl = document.getElementById("summary");
 
 // v1: simple local dev default
 const API_BASE_URL = "http://localhost:3000";
@@ -16,6 +18,11 @@ function setResult(objOrText) {
 
 function setLogs(objOrText) {
   logsEl.textContent =
+    typeof objOrText === "string" ? objOrText : JSON.stringify(objOrText, null, 2);
+}
+
+function setSummary(objOrText) {
+  summaryEl.textContent =
     typeof objOrText === "string" ? objOrText : JSON.stringify(objOrText, null, 2);
 }
 
@@ -61,6 +68,7 @@ async function clockIn() {
   });
   setResult(data);
   await refreshLogs();
+  await refreshSummary();
 }
 
 async function clockOut() {
@@ -74,6 +82,7 @@ async function clockOut() {
   });
   setResult(data);
   await refreshLogs();
+  await refreshSummary();
 }
 
 async function refreshLogs() {
@@ -86,6 +95,16 @@ async function refreshLogs() {
   setLogs(data);
 }
 
+async function refreshSummary() {
+  const workerId = getWorkerId();
+  if (!workerId) {
+    setSummary("Enter a Worker ID to view summary.");
+    return;
+  }
+  const data = await apiFetch(`/summary/${encodeURIComponent(workerId)}`);
+  setSummary(data);
+}
+
 timeInBtn.addEventListener("click", () =>
   clockIn().catch((err) => setResult(`Error: ${err.message}`))
 );
@@ -95,6 +114,10 @@ timeOutBtn.addEventListener("click", () =>
 refreshLogsBtn.addEventListener("click", () =>
   refreshLogs().catch((err) => setLogs(`Error: ${err.message}`))
 );
+refreshSummaryBtn.addEventListener("click", () =>
+  refreshSummary().catch((err) => setSummary(`Error: ${err.message}`))
+);
 
 setResult("Ready.");
 setLogs("Enter a Worker ID then click Refresh Logs.");
+setSummary("Enter a Worker ID then click Refresh Summary.");
