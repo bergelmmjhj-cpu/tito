@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Worker Time In / Time Out</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <main class="container">
+    <h1>Worker Time In / Time Out</h1>
+
+    <section class="card">
+      <label>
+        Worker ID
+        <input id="workerId" type="text" placeholder="e.g. W123" autocomplete="off" />
+      </label>
+
+      <label>
+        Hotel Name
+        <input id="hotelName" type="text" placeholder="e.g. Downtown Suites" autocomplete="off" />
+      </label>
+
+      <div class="actions">
+        <button id="timeInBtn" type="button">Time In</button>
+        <button id="timeOutBtn" type="button">Time Out</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Status</h2>
+      <pre id="result" class="result">Ready.</pre>
+    </section>
+
+    <section class="card">
+      <h2>Logs</h2>
+      <div class="actions">
+        <button id="refreshLogsBtn" type="button">Refresh Logs</button>
+      </div>
+      <pre id="logs" class="result">(none)</pre>
+    </section>
+
+    <footer class="footer">
+      <small>Backend default: http://localhost:3000</small>
+    </footer>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>

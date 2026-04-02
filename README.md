@@ -1,22 +1,65 @@
-# TimeClock App
+# Time In / Time Out (v1)
 
-This is a simple TimeClock application with a plain HTML/CSS/JS frontend and a Node.js + Express backend.
+Simple worker time-tracking starter app.
 
-## Running the Application Locally
+- **Frontend**: plain HTML / CSS / JS (`client/`)
+- **Backend**: Node.js + Express (`server/`)
+- **Storage**: in-memory (resets on server restart)
 
-### Prerequisites
-- Node.js and npm installed.
+## Folder structure
 
-### Steps
-1. Clone the repository.
-2. Navigate to the `server` directory.
-3. Run `npm install` to install the dependencies.
-4. Create a `.env` file based on `.env.example`.
-5. Start the server using `npm start`.
-6. Open `client/index.html` in your browser to access the frontend.
+```text
+client/
+  index.html
+  app.js
+  style.css
 
-## API Endpoints
-- **GET /**: Returns "TimeClock API running"
-- **POST /clock-in**: Accepts `{workerId, hotelName}` to create an open shift.
-- **POST /clock-out**: Accepts `{workerId}` to close the open shift.
-- **GET /logs/:workerId**: Returns logs for the specified worker.
+server/
+  index.js
+  package.json
+  .env.example
+
+README.md
+```
+
+## Run locally
+
+### 1) Start the backend
+
+```bash
+cd server
+npm install
+cp .env.example .env   # optional – defaults to PORT=3000
+npm start
+```
+
+The API will be available at `http://localhost:3000`.
+
+Quick smoke-test:
+
+```bash
+curl http://localhost:3000/
+# TimeClock API running
+```
+
+### 2) Open the frontend
+
+Open `client/index.html` directly in your browser.
+
+> If your browser blocks `fetch` requests due to the `file://` protocol, serve the
+> `client/` folder with a tiny static server instead:
+>
+> ```bash
+> npx serve client
+> ```
+
+## API endpoints
+
+| Method | Path | Body | Description |
+|--------|------|------|-------------|
+| `GET` | `/` | — | Health check – returns `TimeClock API running` |
+| `POST` | `/clock-in` | `{ "workerId": "string", "hotelName": "string" }` | Creates a new open shift. Returns **409** if worker already has an open shift. |
+| `POST` | `/clock-out` | `{ "workerId": "string" }` | Closes the open shift for the worker. Returns **404** if no open shift. |
+| `GET` | `/logs/:workerId` | — | Returns the full shift history array for that worker. |
+
+Missing / invalid fields return **400** with a descriptive `error` message.
