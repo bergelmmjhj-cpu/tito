@@ -27,9 +27,8 @@ README.md
 ### 1) Start the backend
 
 ```bash
-cd server
 npm install
-cp .env.example .env   # optional – defaults to PORT=3000
+cp server/.env.example server/.env   # optional – defaults to PORT=3000
 npm start
 ```
 
@@ -52,6 +51,15 @@ Open `client/index.html` directly in your browser.
 > ```bash
 > npx serve client
 > ```
+
+The frontend uses same-origin API requests in deployed environments and falls back
+to `http://localhost:3000` when loaded via `file://` locally.
+
+## Deployment notes
+
+- Root `package.json` is used for buildpack detection.
+- `Procfile` starts the API with `web: npm start`.
+- The backend still lives in `server/` and is started through root scripts.
 
 ## API endpoints
 

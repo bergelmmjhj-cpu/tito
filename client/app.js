@@ -8,8 +8,15 @@ const resultEl = document.getElementById("result");
 const logsEl = document.getElementById("logs");
 const summaryEl = document.getElementById("summary");
 
-// v1: simple local dev default
-const API_BASE_URL = "http://localhost:3000";
+// Use same-origin in deployed environments, but keep localhost default for file:// local usage.
+const API_BASE_URL = (() => {
+  const configured = window.TIME_CLOCK_API_BASE_URL;
+  if (typeof configured === "string" && configured.trim()) {
+    return configured.replace(/\/$/, "");
+  }
+
+  return window.location.protocol === "file:" ? "http://localhost:3000" : "";
+})();
 
 function setResult(objOrText) {
   resultEl.textContent =

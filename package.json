@@ -1,0 +1,13 @@
+{
+  "name": "tito",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "install": "npm --prefix server install",
+    "start": "npm --prefix server start",
+    "dev": "npm --prefix server run dev"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
