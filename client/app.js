@@ -1,130 +1,207 @@
-const workerIdEl = document.getElementById("workerId");
-const hotelNameEl = document.getElementById("hotelName");
-const timeInBtn = document.getElementById("timeInBtn");
-const timeOutBtn = document.getElementById("timeOutBtn");
-const refreshLogsBtn = document.getElementById("refreshLogsBtn");
-const refreshSummaryBtn = document.getElementById("refreshSummaryBtn");
-const resultEl = document.getElementById("result");
-const logsEl = document.getElementById("logs");
-const summaryEl = document.getElementById("summary");
+const loginViewEl = document.getElementById("loginView");
+const appViewEl = document.getElementById("appView");
+const identifierEl = document.getElementById("identifier");
+const passwordEl = document.getElementById("password");
+const loginBtnEl = document.getElementById("loginBtn");
+const loginErrorEl = document.getElementById("loginError");
+const workerNameEl = document.getElementById("workerName");
+const liveClockEl = document.getElementById("liveClock");
+const statusBadgeEl = document.getElementById("statusBadge");
+const actionErrorEl = document.getElementById("actionError");
+const notesEl = document.getElementById("notes");
+const clockInBtnEl = document.getElementById("clockInBtn");
+const startBreakBtnEl = document.getElementById("startBreakBtn");
+const endBreakBtnEl = document.getElementById("endBreakBtn");
+const clockOutBtnEl = document.getElementById("clockOutBtn");
+const historyBodyEl = document.getElementById("historyBody");
+const refreshHistoryBtnEl = document.getElementById("refreshHistoryBtn");
+const logoutBtnEl = document.getElementById("logoutBtn");
 
-// Use same-origin in deployed environments, but keep localhost default for file:// local usage.
+const TOKEN_KEY = "timeclock_token";
+let authToken = localStorage.getItem(TOKEN_KEY) || "";
+let currentStatus = "not_clocked_in";
+let liveClockIntervalId = null;
+
 const API_BASE_URL = (() => {
   const configured = window.TIME_CLOCK_API_BASE_URL;
   if (typeof configured === "string" && configured.trim()) {
     return configured.replace(/\/$/, "");
   }
-
   return window.location.protocol === "file:" ? "http://localhost:3000" : "";
 })();
 
-function setResult(objOrText) {
-  resultEl.textContent =
-    typeof objOrText === "string" ? objOrText : JSON.stringify(objOrText, null, 2);
+function setError(el, message) {
+  el.textContent = message || "";
+  el.classList.toggle("hidden", !message);
 }
 
-function setLogs(objOrText) {
-  logsEl.textContent =
-    typeof objOrText === "string" ? objOrText : JSON.stringify(objOrText, null, 2);
+function formatDateTime(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString();
 }
 
-function setSummary(objOrText) {
-  summaryEl.textContent =
-    typeof objOrText === "string" ? objOrText : JSON.stringify(objOrText, null, 2);
+function toStatusLabel(status) {
+  if (status === "clocked_in") return "Clocked in";
+  if (status === "on_break") return "On break";
+  if (status === "clocked_out") return "Clocked out";
+  return "Not clocked in";
+}
+
+function renderStatus(status) {
+  currentStatus = status || "not_clocked_in";
+  statusBadgeEl.textContent = toStatusLabel(currentStatus);
+  clockInBtnEl.disabled = currentStatus !== "not_clocked_in" && currentStatus !== "clocked_out";
+  startBreakBtnEl.disabled = currentStatus !== "clocked_in";
+  endBreakBtnEl.disabled = currentStatus !== "on_break";
+  clockOutBtnEl.disabled = currentStatus !== "clocked_in";
+}
+
+function renderHistory(history) {
+  if (!Array.isArray(history) || history.length === 0) {
+    historyBodyEl.innerHTML = `<tr><td colspan="6" class="muted">No attendance history yet.</td></tr>`;
+    return;
+  }
+
+  historyBodyEl.innerHTML = history
+    .map((item) => {
+      const breakStart = Array.isArray(item.breakStart) && item.breakStart.length
+        ? item.breakStart.map(formatDateTime).join("<br>")
+        : "—";
+      const breakEnd = Array.isArray(item.breakEnd) && item.breakEnd.length
+        ? item.breakEnd.map(formatDateTime).join("<br>")
+        : "—";
+
+      return `
+        <tr>
+          <td>${item.date || "—"}</td>
+          <td>${formatDateTime(item.timeIn)}</td>
+          <td>${breakStart}</td>
+          <td>${breakEnd}</td>
+          <td>${formatDateTime(item.timeOut)}</td>
+          <td>${typeof item.totalHours === "number" ? item.totalHours.toFixed(2) : "0.00"}</td>
+        </tr>
+      `;
+    })
+    .join("");
 }
 
 async function apiFetch(path, options = {}) {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-    ...options,
-  });
+  const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+  if (authToken) headers.Authorization = `Bearer ${authToken}`;
 
+  const res = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
   const contentType = res.headers.get("content-type") || "";
-  const data = contentType.includes("application/json")
-    ? await res.json()
-    : await res.text();
+  const data = contentType.includes("application/json") ? await res.json() : await res.text();
 
   if (!res.ok) {
-    const message =
-      typeof data === "string" ? data : data?.error || "Request failed";
+    const message = typeof data === "string" ? data : data?.error || "Request failed";
     throw new Error(message);
   }
-
   return data;
 }
 
-function getWorkerId() {
-  return workerIdEl.value.trim();
+function setLoggedOutState() {
+  authToken = "";
+  localStorage.removeItem(TOKEN_KEY);
+  loginViewEl.classList.remove("hidden");
+  appViewEl.classList.add("hidden");
+  identifierEl.value = "";
+  passwordEl.value = "";
 }
 
-function getHotelName() {
-  return hotelNameEl.value.trim();
+function setLoggedInState() {
+  loginViewEl.classList.add("hidden");
+  appViewEl.classList.remove("hidden");
 }
 
-async function clockIn() {
-  const workerId = getWorkerId();
-  const hotelName = getHotelName();
+async function loadStatus() {
+  const data = await apiFetch("/api/time/status");
+  workerNameEl.textContent = data?.user?.name || "Worker";
+  renderStatus(data?.status);
+}
 
-  if (!workerId) return setResult("Worker ID is required.");
-  if (!hotelName) return setResult("Hotel Name is required.");
+async function loadHistory() {
+  const data = await apiFetch("/api/time/history");
+  renderHistory(data?.history || []);
+}
 
-  setResult("Clocking in...");
-  const data = await apiFetch("/clock-in", {
+async function doAction(actionType) {
+  setError(actionErrorEl, "");
+  const notes = notesEl.value.trim();
+  await apiFetch("/api/time/actions", {
     method: "POST",
-    body: JSON.stringify({ workerId, hotelName }),
+    body: JSON.stringify({ actionType, notes: notes || undefined }),
   });
-  setResult(data);
-  await refreshLogs();
-  await refreshSummary();
+  notesEl.value = "";
+  await Promise.all([loadStatus(), loadHistory()]);
 }
 
-async function clockOut() {
-  const workerId = getWorkerId();
-  if (!workerId) return setResult("Worker ID is required.");
+async function login() {
+  setError(loginErrorEl, "");
+  const identifier = identifierEl.value.trim();
+  const password = passwordEl.value;
 
-  setResult("Clocking out...");
-  const data = await apiFetch("/clock-out", {
+  if (!identifier) return setError(loginErrorEl, "Staff ID or email is required.");
+  if (!password) return setError(loginErrorEl, "Password is required.");
+
+  const data = await apiFetch("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ workerId }),
+    body: JSON.stringify({ identifier, password }),
   });
-  setResult(data);
-  await refreshLogs();
-  await refreshSummary();
+
+  authToken = data.token;
+  localStorage.setItem(TOKEN_KEY, authToken);
+  setLoggedInState();
+  await Promise.all([loadStatus(), loadHistory()]);
 }
 
-async function refreshLogs() {
-  const workerId = getWorkerId();
-  if (!workerId) {
-    setLogs("Enter a Worker ID to view logs.");
+async function initFromSession() {
+  if (!authToken) {
+    setLoggedOutState();
     return;
   }
-  const data = await apiFetch(`/logs/${encodeURIComponent(workerId)}`);
-  setLogs(data);
-}
 
-async function refreshSummary() {
-  const workerId = getWorkerId();
-  if (!workerId) {
-    setSummary("Enter a Worker ID to view summary.");
-    return;
+  try {
+    await Promise.all([loadStatus(), loadHistory()]);
+    setLoggedInState();
+  } catch (error) {
+    setLoggedOutState();
   }
-  const data = await apiFetch(`/summary/${encodeURIComponent(workerId)}`);
-  setSummary(data);
 }
 
-timeInBtn.addEventListener("click", () =>
-  clockIn().catch((err) => setResult(`Error: ${err.message}`))
-);
-timeOutBtn.addEventListener("click", () =>
-  clockOut().catch((err) => setResult(`Error: ${err.message}`))
-);
-refreshLogsBtn.addEventListener("click", () =>
-  refreshLogs().catch((err) => setLogs(`Error: ${err.message}`))
-);
-refreshSummaryBtn.addEventListener("click", () =>
-  refreshSummary().catch((err) => setSummary(`Error: ${err.message}`))
-);
+function startLiveClock() {
+  const render = () => {
+    liveClockEl.textContent = new Date().toLocaleString();
+  };
+  render();
+  liveClockIntervalId = setInterval(render, 1000);
+}
 
-setResult("Ready.");
-setLogs("Enter a Worker ID then click Refresh Logs.");
-setSummary("Enter a Worker ID then click Refresh Summary.");
+loginBtnEl.addEventListener("click", () => {
+  login().catch((error) => setError(loginErrorEl, error.message));
+});
+logoutBtnEl.addEventListener("click", () => setLoggedOutState());
+clockInBtnEl.addEventListener("click", () => {
+  doAction("clock_in").catch((error) => setError(actionErrorEl, error.message));
+});
+startBreakBtnEl.addEventListener("click", () => {
+  doAction("break_start").catch((error) => setError(actionErrorEl, error.message));
+});
+endBreakBtnEl.addEventListener("click", () => {
+  doAction("break_end").catch((error) => setError(actionErrorEl, error.message));
+});
+clockOutBtnEl.addEventListener("click", () => {
+  doAction("clock_out").catch((error) => setError(actionErrorEl, error.message));
+});
+refreshHistoryBtnEl.addEventListener("click", () => {
+  loadHistory().catch((error) => setError(actionErrorEl, error.message));
+});
+
+startLiveClock();
+initFromSession();
+
+window.addEventListener("beforeunload", () => {
+  if (liveClockIntervalId) clearInterval(liveClockIntervalId);
+});

@@ -5,6 +5,7 @@
   --muted: #a9b4d0;
   --accent: #4f7cff;
   --border: rgba(255, 255, 255, 0.10);
+  --danger: #ff798d;
 }
 
 * {
@@ -19,7 +20,7 @@ body {
 }
 
 .container {
-  max-width: 860px;
+  max-width: 900px;
   margin: 40px auto;
   padding: 0 16px;
 }
@@ -42,6 +43,14 @@ h2 {
   padding: 16px;
   margin: 12px 0;
   backdrop-filter: blur(6px);
+}
+
+.hidden {
+  display: none;
+}
+
+.muted {
+  color: var(--muted);
 }
 
 label {
@@ -91,6 +100,48 @@ button:hover {
   background: rgba(79, 124, 255, 0.32);
 }
 
+button.ghost {
+  background: transparent;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.clock {
+  margin: 8px 0;
+  font-size: 1.12rem;
+  font-weight: 600;
+}
+
+.status-line {
+  margin: 8px 0 12px;
+  color: var(--muted);
+}
+
+.badge {
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  padding: 4px 10px;
+  display: inline-block;
+  margin-left: 4px;
+}
+
+.error {
+  margin: 8px 0 0;
+  color: var(--danger);
+  font-size: 0.92rem;
+}
+
 .result {
   margin: 10px 0 0 0;
   padding: 12px;
@@ -102,6 +153,28 @@ button:hover {
   white-space: pre-wrap;
   font-size: 13px;
   line-height: 1.5;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 720px;
+}
+
+th, td {
+  text-align: left;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9rem;
+}
+
+th {
+  color: var(--muted);
+  font-weight: 600;
 }
 
 .footer {
