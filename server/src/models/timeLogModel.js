@@ -2,6 +2,37 @@ import crypto from "node:crypto";
 import { readDatabase, updateDatabase } from "../db/database.js";
 import { nowIso } from "../utils/time.js";
 
+function normalizeLocation(location) {
+  if (!location || typeof location !== "object") return null;
+
+  return {
+    latitude: location.latitude,
+    longitude: location.longitude,
+    accuracy: location.accuracy ?? null,
+    capturedAt: location.capturedAt,
+  };
+}
+
+function normalizeGeofence(geofence) {
+  if (!geofence || typeof geofence !== "object") return null;
+
+  return {
+    workplaceId: geofence.workplaceId || null,
+    workplaceName: geofence.workplaceName || null,
+    radiusMeters:
+      typeof geofence.radiusMeters === "number" && Number.isFinite(geofence.radiusMeters)
+        ? geofence.radiusMeters
+        : null,
+    distanceMeters:
+      typeof geofence.distanceMeters === "number" && Number.isFinite(geofence.distanceMeters)
+        ? geofence.distanceMeters
+        : null,
+    withinGeofence: typeof geofence.withinGeofence === "boolean" ? geofence.withinGeofence : null,
+    enforcementEnabled:
+      typeof geofence.enforcementEnabled === "boolean" ? geofence.enforcementEnabled : false,
+  };
+}
+
 export function getAllShiftsForUser(userId) {
   const db = readDatabase();
   return db.shifts.filter((shift) => shift.userId === userId);
@@ -12,7 +43,12 @@ export function getOpenShiftForUser(userId) {
   return db.shifts.find((shift) => shift.userId === userId && !shift.clockOutAt) || null;
 }
 
-export function saveClockIn(userId, notes = null) {
+export function getTimeLogsForUser(userId) {
+  const db = readDatabase();
+  return db.timeLogs.filter((log) => log.userId === userId);
+}
+
+export function saveClockIn(userId, notes = null, location = null, geofence = null) {
   const timestamp = nowIso();
 
   return updateDatabase((db) => {
@@ -33,6 +69,8 @@ export function saveClockIn(userId, notes = null) {
       shiftId: shift.id,
       actionType: "clock_in",
       timestamp,
+      location: normalizeLocation(location),
+      geofence: normalizeGeofence(geofence),
       notes: notes || null,
     });
 
@@ -40,7 +78,7 @@ export function saveClockIn(userId, notes = null) {
   });
 }
 
-export function saveStartBreak(userId, notes = null) {
+export function saveStartBreak(userId, notes = null, location = null, geofence = null) {
   const timestamp = nowIso();
 
   return updateDatabase((db) => {
@@ -60,6 +98,8 @@ export function saveStartBreak(userId, notes = null) {
       shiftId: shift.id,
       actionType: "break_start",
       timestamp,
+      location: normalizeLocation(location),
+      geofence: normalizeGeofence(geofence),
       notes: notes || null,
     });
 
@@ -67,7 +107,7 @@ export function saveStartBreak(userId, notes = null) {
   });
 }
 
-export function saveEndBreak(userId, notes = null) {
+export function saveEndBreak(userId, notes = null, location = null, geofence = null) {
   const timestamp = nowIso();
 
   return updateDatabase((db) => {
@@ -86,6 +126,8 @@ export function saveEndBreak(userId, notes = null) {
       shiftId: shift.id,
       actionType: "break_end",
       timestamp,
+      location: normalizeLocation(location),
+      geofence: normalizeGeofence(geofence),
       notes: notes || null,
     });
 
@@ -93,7 +135,7 @@ export function saveEndBreak(userId, notes = null) {
   });
 }
 
-export function saveClockOut(userId, notes = null) {
+export function saveClockOut(userId, notes = null, location = null, geofence = null) {
   const timestamp = nowIso();
 
   return updateDatabase((db) => {
@@ -109,6 +151,8 @@ export function saveClockOut(userId, notes = null) {
       shiftId: shift.id,
       actionType: "clock_out",
       timestamp,
+      location: normalizeLocation(location),
+      geofence: normalizeGeofence(geofence),
       notes: notes || null,
     });
 

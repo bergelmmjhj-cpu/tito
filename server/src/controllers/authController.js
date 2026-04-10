@@ -1,6 +1,16 @@
-import { login, requireUserFromToken } from "../services/authService.js";
+import { login, registerWorker, requireUserFromToken } from "../services/authService.js";
 import { toHttpError } from "../utils/errors.js";
 import { parseBearerToken } from "../utils/auth.js";
+
+export function registerController(req, res) {
+  try {
+    const result = registerWorker(req.body || {});
+    res.status(201).json(result);
+  } catch (error) {
+    const err = toHttpError(error);
+    res.status(err.status).json({ error: err.message });
+  }
+}
 
 export function loginController(req, res) {
   try {

@@ -6,6 +6,8 @@ import { initializeDatabase } from "./src/db/database.js";
 import { createAuthRouter } from "./src/routes/authRoutes.js";
 import { createTimeRoutes } from "./src/routes/timeRoutes.js";
 import { createLegacyRoutes } from "./src/routes/legacyRoutes.js";
+import { createWorkplaceRoutes } from "./src/routes/workplaceRoutes.js";
+import { createAdminRoutes } from "./src/routes/adminRoutes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -25,6 +27,8 @@ app.get("/health", (req, res) => {
 
 app.use("/api/auth", createAuthRouter());
 app.use("/api/time", createTimeRoutes());
+app.use("/api/workplaces", createWorkplaceRoutes());
+app.use("/api/admin", createAdminRoutes());
 app.use("/", createLegacyRoutes());
 
 app.listen(PORT, () => {

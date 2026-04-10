@@ -11,6 +11,12 @@
     <h1>Hotel Staff Time Clock</h1>
 
     <section id="loginView" class="card">
+      <div class="auth-switch">
+        <button id="showLoginBtn" type="button" class="ghost">Login</button>
+        <button id="showSignupBtn" type="button" class="ghost">Sign Up</button>
+      </div>
+
+      <section id="loginFormView">
       <h2>Worker Login</h2>
       <p class="muted">Sign in with your Staff ID or email.</p>
       <label>
@@ -25,6 +31,40 @@
       <div class="actions">
         <button id="loginBtn" type="button">Login</button>
       </div>
+      </section>
+
+      <section id="signupFormView" class="hidden">
+        <h2>Worker Sign Up</h2>
+        <p class="muted">Create your account to start clocking attendance.</p>
+        <label>
+          First Name
+          <input id="signupFirstName" type="text" placeholder="First name" autocomplete="given-name" />
+        </label>
+        <label>
+          Last Name
+          <input id="signupLastName" type="text" placeholder="Last name" autocomplete="family-name" />
+        </label>
+        <label>
+          Email
+          <input id="signupEmail" type="email" placeholder="name@company.com" autocomplete="email" />
+        </label>
+        <label>
+          Phone (optional)
+          <input id="signupPhone" type="tel" placeholder="e.g. +1 555 000 0000" autocomplete="tel" />
+        </label>
+        <label>
+          Password
+          <input id="signupPassword" type="password" placeholder="At least 8 characters" autocomplete="new-password" />
+        </label>
+        <label>
+          Confirm Password
+          <input id="signupConfirmPassword" type="password" placeholder="Re-enter password" autocomplete="new-password" />
+        </label>
+        <p id="signupError" class="error hidden"></p>
+        <div class="actions">
+          <button id="signupBtn" type="button">Create Account</button>
+        </div>
+      </section>
     </section>
 
     <section id="appView" class="hidden">
@@ -36,15 +76,41 @@
           </div>
           <button id="logoutBtn" type="button" class="ghost">Logout</button>
         </div>
+        <div class="actions nav-actions">
+          <button id="showTimeClockBtn" type="button" class="ghost">Time Clock</button>
+          <button id="showWorkplacesBtn" type="button" class="ghost hidden">Workplaces</button>
+        </div>
+      </section>
+
+      <section id="timeClockSection" class="card">
         <p id="liveClock" class="clock">—</p>
         <p class="status-line">
           Current status:
           <span id="statusBadge" class="badge">Not clocked in</span>
         </p>
+        <p id="assignedWorkplaceInfo" class="muted">Assigned workplace: none</p>
+        <p id="geofenceInfo" class="muted">Distance check: not evaluated yet</p>
         <label>
           Optional notes
           <input id="notes" type="text" placeholder="Add notes for this action" maxlength="500" />
         </label>
+
+        <section class="location-panel" aria-live="polite">
+          <div class="topbar compact">
+            <h3>Location</h3>
+            <button id="refreshLocationBtn" type="button" class="ghost small">Refresh Location</button>
+          </div>
+          <p class="status-line">
+            Current location status:
+            <span id="locationStatusBadge" class="badge">Location unavailable</span>
+          </p>
+          <p id="locationCoordinates" class="muted">Coordinates: —</p>
+          <div class="last-location">
+            <p class="muted">Last captured location</p>
+            <p id="lastLocationDetails" class="location-details">No location captured yet.</p>
+          </div>
+        </section>
+
         <p id="actionError" class="error hidden"></p>
         <div class="actions">
           <button id="clockInBtn" type="button">Clock In</button>
@@ -54,7 +120,7 @@
         </div>
       </section>
 
-      <section class="card">
+      <section id="historySection" class="card">
         <div class="topbar">
           <h2>Attendance History</h2>
           <button id="refreshHistoryBtn" type="button" class="ghost">Refresh</button>
@@ -64,20 +130,103 @@
             <thead>
               <tr>
                 <th>Date</th>
-                <th>Time In</th>
-                <th>Break Start</th>
-                <th>Break End</th>
-                <th>Time Out</th>
-                <th>Total Hours</th>
+                <th>Action</th>
+                <th>Attendance Time</th>
+                <th>Location</th>
+                <th>Workplace / Distance</th>
+                <th>Accuracy</th>
+                <th>Location Captured</th>
+                <th>Notes</th>
               </tr>
             </thead>
             <tbody id="historyBody">
               <tr>
-                <td colspan="6" class="muted">No attendance history yet.</td>
+                <td colspan="8" class="muted">No attendance history yet.</td>
               </tr>
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section id="workplacesSection" class="card hidden">
+        <div class="topbar">
+          <h2>Workplace Management (Admin)</h2>
+          <button id="refreshWorkplacesBtn" type="button" class="ghost">Refresh</button>
+        </div>
+        <p class="muted">Manage CRM workplaces for future job-site assignment and geofencing.</p>
+        <form id="workplaceForm" class="workplace-form">
+          <input id="workplaceId" type="hidden" />
+          <label>Workplace Name<input id="wpName" type="text" /></label>
+          <label>Address<input id="wpAddress" type="text" /></label>
+          <label>City<input id="wpCity" type="text" /></label>
+          <label>Province / State<input id="wpState" type="text" /></label>
+          <label>Postal Code<input id="wpPostalCode" type="text" /></label>
+          <label>Country<input id="wpCountry" type="text" /></label>
+          <label>Contact Person<input id="wpContactName" type="text" /></label>
+          <label>Contact Phone<input id="wpContactPhone" type="text" /></label>
+          <label>Contact Email<input id="wpContactEmail" type="email" /></label>
+          <label>Latitude<input id="wpLatitude" type="number" step="any" /></label>
+          <label>Longitude<input id="wpLongitude" type="number" step="any" /></label>
+          <label>Geofence Radius (m)<input id="wpRadius" type="number" step="1" min="10" /></label>
+          <label class="checkbox-inline"><input id="wpActive" type="checkbox" checked /> Active</label>
+          <p id="workplaceError" class="error hidden"></p>
+          <div class="actions">
+            <button id="saveWorkplaceBtn" type="submit">Save Workplace</button>
+            <button id="resetWorkplaceBtn" type="button" class="ghost">Clear</button>
+          </div>
+        </form>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>City</th>
+                <th>State</th>
+                <th>Country</th>
+                <th>Coordinates</th>
+                <th>Radius</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="workplacesBody">
+              <tr><td colspan="8" class="muted">No workplaces yet.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <section class="assignment-section">
+          <h3>Worker Workplace Assignment</h3>
+          <p class="muted">Assign each worker to one active workplace for geofencing checks.</p>
+          <div class="assignment-controls">
+            <label>
+              Worker
+              <select id="assignWorkerSelect"></select>
+            </label>
+            <label>
+              Workplace
+              <select id="assignWorkplaceSelect"></select>
+            </label>
+            <button id="saveAssignmentBtn" type="button">Save Assignment</button>
+          </div>
+          <p id="assignmentError" class="error hidden"></p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Worker</th>
+                  <th>Email</th>
+                  <th>Assigned Workplace</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="workerAssignmentsBody">
+                <tr><td colspan="4" class="muted">No workers available.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
       </section>
     </section>
 

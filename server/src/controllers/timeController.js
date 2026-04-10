@@ -1,4 +1,8 @@
-import { getAttendanceHistory, getCurrentStatus, performAction } from "../services/timeService.js";
+import {
+  getAttendanceActionHistory,
+  getCurrentStatus,
+  performAction,
+} from "../services/timeService.js";
 import { toHttpError } from "../utils/errors.js";
 
 export function statusController(req, res) {
@@ -13,9 +17,12 @@ export function statusController(req, res) {
 
 export function actionController(req, res) {
   try {
-    const { actionType, notes } = req.body || {};
-    const result = performAction(req.user.id, actionType, notes);
-    res.json({ user: req.user, ...result });
+    const { actionType, notes, location } = req.body || {};
+    const result = performAction(req.user.id, actionType, notes, location);
+    res.json({
+      user: req.user,
+      ...result,
+    });
   } catch (error) {
     const err = toHttpError(error);
     res.status(err.status).json({ error: err.message });
@@ -24,7 +31,7 @@ export function actionController(req, res) {
 
 export function historyController(req, res) {
   try {
-    const history = getAttendanceHistory(req.user.id);
+    const history = getAttendanceActionHistory(req.user.id);
     res.json({ user: req.user, history });
   } catch (error) {
     const err = toHttpError(error);
