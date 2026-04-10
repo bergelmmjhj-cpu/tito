@@ -14,6 +14,7 @@ First working version of a worker time clock flow for hotel staff.
 - Time clock page with live status and actions (clock in, break start/end, clock out)
 - Browser geolocation capture on every attendance action (clock in, break start/end, clock out)
 - Per-action location history (coordinates, accuracy, location capture timestamp)
+- Small OpenStreetMap preview for current/last captured location and history row preview
 - Attendance history page for worker-only logs
 - Request validation and invalid-order prevention
 - Modular backend structure ready for future admin routes
@@ -92,6 +93,8 @@ curl http://localhost:3000/health
   - `capturedAt` (location capture timestamp)
 - If permission is denied or location is unavailable, the action is blocked and a clear error is shown.
 - Frontend status panel shows: `Locating...`, `Location captured`, `Location denied`, or `Location unavailable`.
+- Clock In stays disabled until a valid location has been captured.
+- The Time Clock page shows a small OpenStreetMap preview centered on the last captured location.
 
 ### Browser requirements
 
@@ -99,6 +102,7 @@ curl http://localhost:3000/health
   - `https://` in production
   - `http://localhost` is allowed for local development
 - If testing from another insecure origin, geolocation may be blocked by the browser.
+- The map uses OpenStreetMap tiles loaded from the public tile service, so network access is required for the visual map tiles to appear.
 
 ### Optional config
 
@@ -274,6 +278,7 @@ Current implementation note:
 
 - Distance-to-assigned-workplace is already calculated and returned in time action/history responses.
 - Strict blocking is controlled by `ENFORCE_CLOCKIN_GEOFENCE` so rollout can stay safe while operations configure assignments.
+- Clock In is blocked in the frontend until valid location data exists, and the backend also rejects missing clock-in location with `location is required for clock in`.
 
 ## v1 security notes
 

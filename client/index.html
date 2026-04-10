@@ -4,6 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Hotel Staff Time Clock</title>
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
@@ -108,6 +114,15 @@
           <div class="last-location">
             <p class="muted">Last captured location</p>
             <p id="lastLocationDetails" class="location-details">No location captured yet.</p>
+          </div>
+          <div class="map-panel">
+            <div class="topbar compact">
+              <h3>Location Map</h3>
+              <p id="mapStatusText" class="muted map-status">Waiting for location</p>
+            </div>
+            <div id="locationMap" class="location-map hidden" aria-label="Captured location map"></div>
+            <div id="mapPlaceholder" class="map-placeholder">Location not captured yet.</div>
+            <p id="mapCoordinatesText" class="muted">Map coordinates: —</p>
           </div>
         </section>
 
@@ -234,6 +249,11 @@
       <small>Demo worker: W1001 / password123</small>
     </footer>
   </main>
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
   <script src="./app.js"></script>
 </body>
 </html>

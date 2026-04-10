@@ -112,6 +112,10 @@ function validateLocationPayload(location) {
 }
 
 function parseActionLocation(actionType, location) {
+  if (actionType === "clock_in" && LOCATION_REQUIRED && !location) {
+    throw new HttpError(400, "location is required for clock in");
+  }
+
   if (ACTION_TYPES.has(actionType) && LOCATION_REQUIRED) {
     return validateLocationPayload(location);
   }

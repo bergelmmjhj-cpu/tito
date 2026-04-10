@@ -37,6 +37,10 @@ const refreshLocationBtnEl = document.getElementById("refreshLocationBtn");
 const locationStatusBadgeEl = document.getElementById("locationStatusBadge");
 const locationCoordinatesEl = document.getElementById("locationCoordinates");
 const lastLocationDetailsEl = document.getElementById("lastLocationDetails");
+const locationMapEl = document.getElementById("locationMap");
+const mapPlaceholderEl = document.getElementById("mapPlaceholder");
+const mapStatusTextEl = document.getElementById("mapStatusText");
+const mapCoordinatesTextEl = document.getElementById("mapCoordinatesText");
 
 const showTimeClockBtnEl = document.getElementById("showTimeClockBtn");
 const showWorkplacesBtnEl = document.getElementById("showWorkplacesBtn");
@@ -77,6 +81,8 @@ let currentStatus = "not_clocked_in";
 let liveClockIntervalId = null;
 let lastCapturedLocation = null;
 let currentUser = null;
+let locationMap = null;
+let locationMarker = null;
 
 const API_BASE_URL = (() => {
   const configured = window.TIME_CLOCK_API_BASE_URL;
@@ -126,6 +132,72 @@ function formatCoordinates(latitude, longitude) {
   return `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
 }
 
+function isValidLocation(location) {
+  return Boolean(
+    location &&
+      typeof location.latitude === "number" &&
+      Number.isFinite(location.latitude) &&
+      typeof location.longitude === "number" &&
+      Number.isFinite(location.longitude)
+  );
+}
+
+function ensureMap() {
+  if (locationMap || typeof window.L === "undefined") return locationMap;
+
+  locationMap = window.L.map(locationMapEl, {
+    zoomControl: true,
+    attributionControl: true,
+  }).setView([0, 0], 2);
+
+  window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap contributors',
+  }).addTo(locationMap);
+
+  return locationMap;
+}
+
+function showMapPlaceholder(message, statusText) {
+  locationMapEl.classList.add("hidden");
+  mapPlaceholderEl.classList.remove("hidden");
+  mapPlaceholderEl.textContent = message;
+  mapStatusTextEl.textContent = statusText;
+  mapCoordinatesTextEl.textContent = "Map coordinates: —";
+}
+
+function updateMapPreview(location, label = "Captured location") {
+  if (!isValidLocation(location)) {
+    showMapPlaceholder("Location not captured yet.", "Waiting for location");
+    return;
+  }
+
+  const map = ensureMap();
+  if (!map) {
+    showMapPlaceholder("Map unavailable in this browser session.", "Map unavailable");
+    return;
+  }
+
+  locationMapEl.classList.remove("hidden");
+  mapPlaceholderEl.classList.add("hidden");
+  mapStatusTextEl.textContent = label;
+  mapCoordinatesTextEl.textContent = `Map coordinates: ${formatCoordinates(
+    location.latitude,
+    location.longitude
+  )}`;
+
+  const latLng = [location.latitude, location.longitude];
+  if (!locationMarker) {
+    locationMarker = window.L.marker(latLng).addTo(map);
+  } else {
+    locationMarker.setLatLng(latLng);
+  }
+
+  locationMarker.bindPopup(label).openPopup();
+  map.setView(latLng, 15);
+  setTimeout(() => map.invalidateSize(), 0);
+}
+
 function parseNumberInput(value) {
   const clean = String(value || "").trim();
   if (!clean) return Number.NaN;
@@ -161,6 +233,7 @@ function renderLocationState(status, location = null) {
   if (status === "locating") {
     locationStatusBadgeEl.textContent = "Locating...";
     locationCoordinatesEl.textContent = "Coordinates: waiting for browser geolocation...";
+    showMapPlaceholder("Waiting for location...", "Locating...");
     return;
   }
 
@@ -171,23 +244,27 @@ function renderLocationState(status, location = null) {
     lastLocationDetailsEl.textContent = `Lat/Lon ${coordinates} | Accuracy ${
       typeof location.accuracy === "number" ? `${location.accuracy.toFixed(1)}m` : "n/a"
     } | Captured ${formatDateTime(location.capturedAt)}`;
+    updateMapPreview(location, "Last captured location");
     return;
   }
 
   if (status === "denied") {
     locationStatusBadgeEl.textContent = "Location denied";
     locationCoordinatesEl.textContent = "Coordinates: unavailable (permission denied).";
+    showMapPlaceholder("Location permission required.", "Location denied");
     return;
   }
 
   locationStatusBadgeEl.textContent = "Location unavailable";
   locationCoordinatesEl.textContent = "Coordinates: unavailable.";
+  showMapPlaceholder("Location not captured yet.", "Location unavailable");
 }
 
 function renderStatus(status) {
   currentStatus = status || "not_clocked_in";
   statusBadgeEl.textContent = toStatusLabel(currentStatus);
-  clockInBtnEl.disabled = currentStatus !== "not_clocked_in" && currentStatus !== "clocked_out";
+  const canClockInByStatus = currentStatus === "not_clocked_in" || currentStatus === "clocked_out";
+  clockInBtnEl.disabled = !canClockInByStatus || !isValidLocation(lastCapturedLocation);
   startBreakBtnEl.disabled = currentStatus !== "clocked_in";
   endBreakBtnEl.disabled = currentStatus !== "on_break";
   clockOutBtnEl.disabled = currentStatus !== "clocked_in";
@@ -256,7 +333,12 @@ function renderHistory(history) {
       ].join(" / ");
 
       return `
-        <tr>
+        <tr
+          ${typeof item.latitude === "number" ? `data-latitude="${item.latitude}"` : ""}
+          ${typeof item.longitude === "number" ? `data-longitude="${item.longitude}"` : ""}
+          data-label="${toActionLabel(item.actionType)} ${formatDateTime(item.attendanceTimestamp)}"
+          title="Preview this captured location on the map"
+        >
           <td>${attendanceDate}</td>
           <td>${toActionLabel(item.actionType)}</td>
           <td>${formatDateTime(item.attendanceTimestamp)}</td>
@@ -494,6 +576,11 @@ async function loadWorkerAssignments() {
 
 async function doAction(actionType) {
   setError(actionErrorEl, "");
+  if (actionType === "clock_in" && !isValidLocation(lastCapturedLocation)) {
+    setError(actionErrorEl, "Location is required before clocking in.");
+    return;
+  }
+
   const notes = notesEl.value.trim();
   const location = await collectActionLocation();
 
@@ -516,8 +603,20 @@ async function refreshLocation() {
   setError(actionErrorEl, "");
   try {
     await collectActionLocation();
+    renderStatus(currentStatus);
   } catch (error) {
     setError(actionErrorEl, error.message);
+    renderStatus(currentStatus);
+  }
+}
+
+async function refreshLocationSilently() {
+  try {
+    await collectActionLocation();
+  } catch {
+    // Keep existing status UI and button gating when location is unavailable.
+  } finally {
+    renderStatus(currentStatus);
   }
 }
 
@@ -539,6 +638,7 @@ async function login() {
   setLoggedInState();
   renderLocationState("unavailable");
   await Promise.all([loadStatus(), loadHistory()]);
+  await refreshLocationSilently();
 }
 
 async function signup() {
@@ -571,6 +671,7 @@ async function signup() {
   setLoggedInState();
   renderLocationState("unavailable");
   await Promise.all([loadStatus(), loadHistory()]);
+  await refreshLocationSilently();
 }
 
 async function saveWorkplace(event) {
@@ -674,6 +775,7 @@ async function initFromSession() {
     await Promise.all([loadStatus(), loadHistory()]);
     setLoggedInState();
     renderLocationState("unavailable");
+    await refreshLocationSilently();
   } catch (error) {
     setLoggedOutState();
   }
@@ -745,10 +847,24 @@ resetWorkplaceBtnEl.addEventListener("click", () => {
 workplacesBodyEl.addEventListener("click", (event) => {
   handleWorkplaceTableClick(event);
 });
+historyBodyEl.addEventListener("click", (event) => {
+  const row = event.target.closest("tr[data-latitude][data-longitude]");
+  if (!row) return;
+
+  const latitude = Number(row.dataset.latitude);
+  const longitude = Number(row.dataset.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+
+  updateMapPreview(
+    { latitude, longitude },
+    row.dataset.label || "History location preview"
+  );
+});
 
 startLiveClock();
 setAuthMode("login");
 resetWorkplaceForm();
+showMapPlaceholder("Location not captured yet.", "Waiting for location");
 initFromSession();
 
 window.addEventListener("beforeunload", () => {
