@@ -10,5 +10,5 @@ export function verifyPassword(password, salt, hash) {
   const incoming = crypto
     .pbkdf2Sync(password, salt, 100_000, 64, "sha512")
     .toString("hex");
-  return crypto.timingSafeEqual(Buffer.from(incoming), Buffer.from(hash));
+  return crypto.timingSafeEqual(Buffer.from(incoming, "hex"), Buffer.from(hash, "hex"));
 }

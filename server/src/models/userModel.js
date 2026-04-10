@@ -6,8 +6,10 @@ export function findUserByIdentifier(identifier) {
 
   return (
     db.users.find((user) => {
-      if (user.staffId.toLowerCase() === normalized) return true;
-      return user.email.toLowerCase() === normalized;
+      const staffId = typeof user.staffId === "string" ? user.staffId.toLowerCase() : "";
+      const email = typeof user.email === "string" ? user.email.toLowerCase() : "";
+      if (staffId === normalized) return true;
+      return email === normalized;
     }) || null
   );
 }

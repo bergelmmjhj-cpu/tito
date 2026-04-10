@@ -1,16 +1,10 @@
 import { requireUserFromToken } from "../services/authService.js";
 import { toHttpError } from "../utils/errors.js";
-
-function getBearerToken(req) {
-  const value = req.headers.authorization || "";
-  const [type, token] = value.split(" ");
-  if (type !== "Bearer" || !token) return null;
-  return token.trim();
-}
+import { parseBearerToken } from "../utils/auth.js";
 
 export function authMiddleware(req, res, next) {
   try {
-    const token = getBearerToken(req);
+    const token = parseBearerToken(req);
     req.user = requireUserFromToken(token);
     next();
   } catch (error) {

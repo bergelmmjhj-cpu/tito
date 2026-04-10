@@ -20,6 +20,7 @@ const logoutBtnEl = document.getElementById("logoutBtn");
 const TOKEN_KEY = "timeclock_token";
 let authToken = localStorage.getItem(TOKEN_KEY) || "";
 let currentStatus = "not_clocked_in";
+let liveClockIntervalId = null;
 
 const API_BASE_URL = (() => {
   const configured = window.TIME_CLOCK_API_BASE_URL;
@@ -175,7 +176,7 @@ function startLiveClock() {
     liveClockEl.textContent = new Date().toLocaleString();
   };
   render();
-  setInterval(render, 1000);
+  liveClockIntervalId = setInterval(render, 1000);
 }
 
 loginBtnEl.addEventListener("click", () => {
@@ -200,3 +201,7 @@ refreshHistoryBtnEl.addEventListener("click", () => {
 
 startLiveClock();
 initFromSession();
+
+window.addEventListener("beforeunload", () => {
+  if (liveClockIntervalId) clearInterval(liveClockIntervalId);
+});

@@ -111,7 +111,7 @@ Migration logic lives in:
 | Method | Path | Body | Description |
 |--------|------|------|-------------|
 | `GET` | `/api/time/status` | — | Current worker status and open shift |
-| `POST` | `/api/time/actions` | `{ "actionType": "clock_in\\|break_start\\|break_end\\|clock_out", "notes": "optional" }` | Run time action |
+| `POST` | `/api/time/actions` | `{ "actionType": "clock_in, break_start, break_end, or clock_out", "notes": "optional" }` | Run time action |
 | `GET` | `/api/time/history` | — | Worker attendance history |
 
 ### Legacy compatibility routes
@@ -141,3 +141,8 @@ Existing v1 routes are still available:
 6. Click **End Break**
 7. Click **Clock Out**
 8. Confirm history table updates and total hours are shown
+
+## v1 security notes
+
+- Session tokens are stored in browser `localStorage` for this starter version (not ideal for production because XSS can expose tokens).
+- Session data is in-memory on the server and resets on server restart.

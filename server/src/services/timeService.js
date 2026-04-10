@@ -9,9 +9,14 @@ import {
 import { HttpError } from "../utils/errors.js";
 import { minutesBetween } from "../utils/time.js";
 
+const NOTES_MAX_LENGTH = 500; // keep notes concise for UI display and log storage
+
 function getActiveBreak(shift) {
   if (!shift || !Array.isArray(shift.breaks)) return null;
-  return [...shift.breaks].reverse().find((item) => !item.endAt) || null;
+  for (let i = shift.breaks.length - 1; i >= 0; i -= 1) {
+    if (!shift.breaks[i].endAt) return shift.breaks[i];
+  }
+  return null;
 }
 
 function resolveStatus(userId) {
@@ -42,7 +47,7 @@ function calculateWorkedMinutes(shift) {
 function validateNotes(notes) {
   if (notes === undefined || notes === null || notes === "") return null;
   if (typeof notes !== "string") throw new HttpError(400, "notes must be a string");
-  return notes.trim().slice(0, 500);
+  return notes.trim().slice(0, NOTES_MAX_LENGTH);
 }
 
 export function getCurrentStatus(userId) {

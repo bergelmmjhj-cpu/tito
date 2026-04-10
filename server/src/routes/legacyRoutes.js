@@ -3,11 +3,6 @@ import { findUserByIdentifier } from "../models/userModel.js";
 import { getAttendanceHistory, getCurrentStatus, performAction } from "../services/timeService.js";
 import { toHttpError } from "../utils/errors.js";
 
-function getUserByWorkerId(workerId) {
-  const user = findUserByIdentifier(workerId);
-  return user || null;
-}
-
 function toLegacyShift(historyItem, workerId) {
   return {
     id: historyItem.shiftId,
@@ -43,7 +38,7 @@ export function createLegacyRoutes() {
         return res.status(400).json({ error: "workerId is required and must be a string" });
       }
 
-      const user = getUserByWorkerId(workerId.trim());
+      const user = findUserByIdentifier(workerId.trim());
       if (!user) return res.status(404).json({ error: "Unknown workerId" });
 
       performAction(user.id, "clock_in");
@@ -62,7 +57,7 @@ export function createLegacyRoutes() {
         return res.status(400).json({ error: "workerId is required and must be a string" });
       }
 
-      const user = getUserByWorkerId(workerId.trim());
+      const user = findUserByIdentifier(workerId.trim());
       if (!user) return res.status(404).json({ error: "Unknown workerId" });
 
       performAction(user.id, "clock_out");
@@ -78,7 +73,7 @@ export function createLegacyRoutes() {
     const workerId = (req.params.workerId || "").trim();
     if (!workerId) return res.status(400).json({ error: "workerId param is required" });
 
-    const user = getUserByWorkerId(workerId);
+    const user = findUserByIdentifier(workerId);
     if (!user) return res.status(404).json({ error: "Unknown workerId" });
 
     const history = getAttendanceHistory(user.id);
@@ -89,7 +84,7 @@ export function createLegacyRoutes() {
     const workerId = (req.params.workerId || "").trim();
     if (!workerId) return res.status(400).json({ error: "workerId param is required" });
 
-    const user = getUserByWorkerId(workerId);
+    const user = findUserByIdentifier(workerId);
     if (!user) return res.status(404).json({ error: "Unknown workerId" });
 
     const status = getCurrentStatus(user.id);

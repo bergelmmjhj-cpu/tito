@@ -1,12 +1,6 @@
 import { login, requireUserFromToken } from "../services/authService.js";
 import { toHttpError } from "../utils/errors.js";
-
-function getBearerToken(req) {
-  const value = req.headers.authorization || "";
-  const [type, token] = value.split(" ");
-  if (type !== "Bearer" || !token) return null;
-  return token.trim();
-}
+import { parseBearerToken } from "../utils/auth.js";
 
 export function loginController(req, res) {
   try {
@@ -21,7 +15,7 @@ export function loginController(req, res) {
 
 export function meController(req, res) {
   try {
-    const token = getBearerToken(req);
+    const token = parseBearerToken(req);
     const user = requireUserFromToken(token);
     res.json({ user });
   } catch (error) {

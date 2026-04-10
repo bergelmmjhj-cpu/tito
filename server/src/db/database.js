@@ -9,7 +9,9 @@ const DATA_DIR = path.resolve(__dirname, "../../data");
 const DB_FILE = path.resolve(DATA_DIR, "db.json");
 
 function writeDatabase(db) {
-  fs.writeFileSync(DB_FILE, `${JSON.stringify(db, null, 2)}\n`, "utf8");
+  const tempFile = `${DB_FILE}.tmp`;
+  fs.writeFileSync(tempFile, `${JSON.stringify(db, null, 2)}\n`, "utf8");
+  fs.renameSync(tempFile, DB_FILE);
 }
 
 export function initializeDatabase() {
