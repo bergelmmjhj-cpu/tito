@@ -2,18 +2,14 @@
 
 First working version of a worker time clock flow for hotel staff.
 
-- **Frontend**: plain HTML / CSS / JS (`client/`)
-- **Backend**: Node.js + Express (`server/`)
-- **Storage**: JSON-backed local database with schema migration (`server/data/db.json`)
+- Frontend: plain HTML/CSS/JS in `client/`
+- Backend: Node.js + Express in `server/`
+- Storage: JSON-backed local database with schema migration (`server/data/db.json`)
 
 ## Features
 
-- Worker login (Staff ID or email + password)
-- Time clock page with:
-  - current date/time
-  - worker name
-  - status: not clocked in / clocked in / on break / clocked out
-  - actions: clock in, start break, end break, clock out
+- Worker login (staff ID or email + password)
+- Time clock page with live status and actions (clock in, break start/end, clock out)
 - Attendance history page for worker-only logs
 - Request validation and invalid-order prevention
 - Modular backend structure ready for future admin routes
@@ -31,7 +27,7 @@ server/
   package.json
   .env.example
   data/
-    db.json                  # created on first run
+    db.json
   src/
     controllers/
     db/
@@ -57,17 +53,24 @@ cp server/.env.example server/.env   # optional
 npm start
 ```
 
-API runs at `http://localhost:3000`.
-
 ### 3) Open frontend
 
-Open `client/index.html` in browser.
+Open `http://localhost:3000` in your browser. The Express server now serves the frontend.
 
-If needed, serve the client folder:
+Quick smoke-test:
 
 ```bash
-npx serve client
+curl http://localhost:3000/health
+# TimeClock API running
 ```
+
+## Deployment notes
+
+- Root `package.json` is used for buildpack detection.
+- `Procfile` starts the API with `web: npm start`.
+- The backend lives in `server/` and is started through root scripts.
+- Express serves both the API and the frontend from a single Railway service.
+- Visiting the Railway URL loads the web app directly.
 
 ## Demo login
 
@@ -83,7 +86,7 @@ Also available:
 
 ## Database schema and migration
 
-The app initializes and migrates a local JSON database at startup:
+The app initializes and migrates a local JSON database at startup.
 
 - `schemaVersion`
 - `users[]`
@@ -99,6 +102,12 @@ Migration logic lives in:
 
 ## API routes
 
+### Health
+
+| Method | Path | Body | Description |
+|--------|------|------|-------------|
+| `GET` | `/health` | - | Health check, returns `TimeClock API running` |
+
 ### Auth
 
 | Method | Path | Body | Description |
@@ -110,9 +119,9 @@ Migration logic lives in:
 
 | Method | Path | Body | Description |
 |--------|------|------|-------------|
-| `GET` | `/api/time/status` | — | Current worker status and open shift |
+| `GET` | `/api/time/status` | - | Current worker status and open shift |
 | `POST` | `/api/time/actions` | `{ "actionType": "clock_in, break_start, break_end, or clock_out", "notes": "optional" }` | Run time action |
-| `GET` | `/api/time/history` | — | Worker attendance history |
+| `GET` | `/api/time/history` | - | Worker attendance history |
 
 ### Legacy compatibility routes
 
@@ -134,12 +143,12 @@ Existing v1 routes are still available:
 ## Quick test flow
 
 1. Start backend with `npm start`
-2. Open `client/index.html`
+2. Open `http://localhost:3000`
 3. Login with `W1001` / `password123`
-4. Click **Clock In**
-5. Click **Start Break**
-6. Click **End Break**
-7. Click **Clock Out**
+4. Click Clock In
+5. Click Start Break
+6. Click End Break
+7. Click Clock Out
 8. Confirm history table updates and total hours are shown
 
 ## v1 security notes
