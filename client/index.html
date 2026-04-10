@@ -3,56 +3,88 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Worker Time In / Time Out</title>
+  <title>Hotel Staff Time Clock</title>
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
   <main class="container">
-    <h1>Worker Time In / Time Out</h1>
+    <h1>Hotel Staff Time Clock</h1>
 
-    <section class="card">
+    <section id="loginView" class="card">
+      <h2>Worker Login</h2>
+      <p class="muted">Sign in with your Staff ID or email.</p>
       <label>
-        Worker ID
-        <input id="workerId" type="text" placeholder="e.g. W123" autocomplete="off" />
+        Staff ID or Email
+        <input id="identifier" type="text" placeholder="e.g. W1001 or maria@hotel.local" autocomplete="username" />
       </label>
-
       <label>
-        Hotel Name
-        <input id="hotelName" type="text" placeholder="e.g. Downtown Suites" autocomplete="off" />
+        Password
+        <input id="password" type="password" placeholder="Enter password" autocomplete="current-password" />
       </label>
-
+      <p id="loginError" class="error hidden"></p>
       <div class="actions">
-        <button id="timeInBtn" type="button">Time In</button>
-        <button id="timeOutBtn" type="button">Time Out</button>
+        <button id="loginBtn" type="button">Login</button>
       </div>
     </section>
 
-    <section class="card">
-      <h2>Status</h2>
-      <pre id="result" class="result">Ready.</pre>
-    </section>
+    <section id="appView" class="hidden">
+      <section class="card">
+        <div class="topbar">
+          <div>
+            <p class="muted">Welcome</p>
+            <h2 id="workerName">—</h2>
+          </div>
+          <button id="logoutBtn" type="button" class="ghost">Logout</button>
+        </div>
+        <p id="liveClock" class="clock">—</p>
+        <p class="status-line">
+          Current status:
+          <span id="statusBadge" class="badge">Not clocked in</span>
+        </p>
+        <label>
+          Optional notes
+          <input id="notes" type="text" placeholder="Add notes for this action" maxlength="500" />
+        </label>
+        <p id="actionError" class="error hidden"></p>
+        <div class="actions">
+          <button id="clockInBtn" type="button">Clock In</button>
+          <button id="startBreakBtn" type="button">Start Break</button>
+          <button id="endBreakBtn" type="button">End Break</button>
+          <button id="clockOutBtn" type="button">Clock Out</button>
+        </div>
+      </section>
 
-    <section class="card">
-      <h2>Logs</h2>
-      <div class="actions">
-        <button id="refreshLogsBtn" type="button">Refresh Logs</button>
-      </div>
-      <pre id="logs" class="result">(none)</pre>
-    </section>
-
-    <section class="card">
-      <h2>Summary</h2>
-      <div class="actions">
-        <button id="refreshSummaryBtn" type="button">Refresh Summary</button>
-      </div>
-      <pre id="summary" class="result">(none)</pre>
+      <section class="card">
+        <div class="topbar">
+          <h2>Attendance History</h2>
+          <button id="refreshHistoryBtn" type="button" class="ghost">Refresh</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Time In</th>
+                <th>Break Start</th>
+                <th>Break End</th>
+                <th>Time Out</th>
+                <th>Total Hours</th>
+              </tr>
+            </thead>
+            <tbody id="historyBody">
+              <tr>
+                <td colspan="6" class="muted">No attendance history yet.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
     </section>
 
     <footer class="footer">
-      <small>Backend default: http://localhost:3000</small>
+      <small>Demo worker: W1001 / password123</small>
     </footer>
   </main>
-
   <script src="./app.js"></script>
 </body>
 </html>
