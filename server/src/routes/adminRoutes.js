@@ -2,6 +2,11 @@ import { Router } from "express";
 import { authMiddleware } from "../middleware/authMiddleware.js";
 import { requireRole } from "../middleware/roleMiddleware.js";
 import {
+  adminAccessController,
+  adminLoginController,
+  adminMeController,
+} from "../controllers/adminAuthController.js";
+import {
   assignWorkerWorkplaceController,
   listAssignableWorkplacesController,
   listWorkersController,
@@ -21,8 +26,17 @@ import {
 export function createAdminRoutes() {
   const router = Router();
 
+  // Dedicated admin login endpoint.
+  router.post("/login", adminLoginController);
+
   router.use(authMiddleware);
+
+  // Frontend auth/role probe for admin route checks.
+  router.get("/access", adminAccessController);
+
   router.use(requireRole("admin"));
+
+  router.get("/me", adminMeController);
 
   router.get("/workers", listWorkersController);
   router.patch("/workers/:workerUserId/workplace", assignWorkerWorkplaceController);

@@ -88,7 +88,7 @@ async function generateStaffId() {
   return `W${candidate}`;
 }
 
-export async function login(identifier, password) {
+async function authenticateWithCredentials(identifier, password) {
   if (typeof identifier !== "string" || !identifier.trim()) {
     throw new HttpError(400, "Staff ID or email is required");
   }
@@ -102,6 +102,23 @@ export async function login(identifier, password) {
 
   const ok = verifyPassword(password, user.passwordSalt, user.passwordHash);
   if (!ok) throw new HttpError(401, "Invalid login credentials");
+
+  return user;
+}
+
+export async function login(identifier, password) {
+  const user = await authenticateWithCredentials(identifier, password);
+
+  const token = await createSession(user.id);
+  return { token, user: sanitizeUser(user) };
+}
+
+export async function loginAdmin(identifier, password) {
+  const user = await authenticateWithCredentials(identifier, password);
+
+  if (user.role !== "admin") {
+    throw new HttpError(403, "Forbidden: admin role required");
+  }
 
   const token = await createSession(user.id);
   return { token, user: sanitizeUser(user) };

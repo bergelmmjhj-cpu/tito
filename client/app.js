@@ -8,6 +8,7 @@ const showSignupBtnEl = document.getElementById("showSignupBtn");
 const identifierEl = document.getElementById("identifier");
 const passwordEl = document.getElementById("password");
 const loginBtnEl = document.getElementById("loginBtn");
+const adminLoginBtnEl = document.getElementById("adminLoginBtn");
 const loginErrorEl = document.getElementById("loginError");
 
 const signupFirstNameEl = document.getElementById("signupFirstName");
@@ -773,6 +774,41 @@ async function login() {
   await refreshLocationSilently();
 }
 
+async function loginAsAdmin() {
+  setError(loginErrorEl, "");
+  const identifier = identifierEl.value.trim();
+  const password = passwordEl.value;
+
+  if (!identifier) return setError(loginErrorEl, "Email or staff ID is required.");
+  if (!password) return setError(loginErrorEl, "Password is required.");
+
+  const data = await apiFetch("/api/admin/login", {
+    method: "POST",
+    body: JSON.stringify({ identifier, password }),
+  });
+
+  authToken = data.token;
+  localStorage.setItem(TOKEN_KEY, authToken);
+  setLoggedInState();
+  renderLocationState("unavailable");
+  await Promise.all([loadStatus(), loadHistory()]);
+  await refreshLocationSilently();
+
+  openScreen("users");
+  await loadAdminUsers();
+}
+
+async function requireAdminAccessForScreen(errorEl) {
+  const access = await apiFetch("/api/admin/access");
+  if (!access?.authenticated) {
+    throw new Error("Authentication required");
+  }
+  if (!access?.isAdmin) {
+    throw new Error("Forbidden: admin access required");
+  }
+  if (errorEl) setError(errorEl, "");
+}
+
 async function signup() {
   setError(signupErrorEl, "");
   const payload = {
@@ -927,6 +963,9 @@ showSignupBtnEl.addEventListener("click", () => setAuthMode("signup"));
 loginBtnEl.addEventListener("click", () => {
   login().catch((error) => setError(loginErrorEl, error.message));
 });
+adminLoginBtnEl.addEventListener("click", () => {
+  loginAsAdmin().catch((error) => setError(loginErrorEl, error.message));
+});
 signupBtnEl.addEventListener("click", () => {
   signup().catch((error) => setError(signupErrorEl, error.message));
 });
@@ -936,17 +975,21 @@ logoutBtnEl.addEventListener("click", () => setLoggedOutState());
 showTimeClockBtnEl.addEventListener("click", () => openScreen("time"));
 showWorkplacesBtnEl.addEventListener("click", () => {
   openScreen("workplaces");
-  Promise.all([loadWorkplaces(), loadWorkerAssignments()]).catch((error) =>
-    setError(workplaceErrorEl, error.message)
-  );
+  requireAdminAccessForScreen(workplaceErrorEl)
+    .then(() => Promise.all([loadWorkplaces(), loadWorkerAssignments()]))
+    .catch((error) => setError(workplaceErrorEl, error.message));
 });
 showUsersBtnEl.addEventListener("click", () => {
   openScreen("users");
-  loadAdminUsers().catch((error) => setError(adminUserErrorEl, error.message));
+  requireAdminAccessForScreen(adminUserErrorEl)
+    .then(() => loadAdminUsers())
+    .catch((error) => setError(adminUserErrorEl, error.message));
 });
 showTimesheetsBtnEl.addEventListener("click", () => {
   openScreen("timesheets");
-  initTimesheetsScreen().catch((error) => setError(timesheetErrorEl, error.message));
+  requireAdminAccessForScreen(timesheetErrorEl)
+    .then(() => initTimesheetsScreen())
+    .catch((error) => setError(timesheetErrorEl, error.message));
 });
 
 clockInBtnEl.addEventListener("click", () => {
@@ -976,7 +1019,9 @@ refreshWorkplacesBtnEl.addEventListener("click", () => {
 });
 
 refreshUsersBtnEl.addEventListener("click", () => {
-  loadAdminUsers().catch((error) => setError(adminUserErrorEl, error.message));
+  requireAdminAccessForScreen(adminUserErrorEl)
+    .then(() => loadAdminUsers())
+    .catch((error) => setError(adminUserErrorEl, error.message));
 });
 
 saveAssignmentBtnEl.addEventListener("click", () => {
