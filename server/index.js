@@ -2,7 +2,12 @@ import express from "express";
 import cors from "cors";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { initializeDatabase } from "./src/db/initialization.js";
+import {
+  checkDatabaseConnected,
+  getInitializationDiagnostics,
+  getStorageMode,
+  initializeDatabase,
+} from "./src/db/initialization.js";
 import { ensureBootstrapAdminExists } from "./src/services/adminBootstrapService.js";
 import { createAuthRouter } from "./src/routes/authRoutes.js";
 import { createTimeRoutes } from "./src/routes/timeRoutes.js";
@@ -18,12 +23,23 @@ const PORT = process.env.PORT || 3000;
 
 async function startServer() {
   try {
+    const environment = process.env.NODE_ENV || "development";
+    console.log(
+      `[startup] environment=${environment} storage_mode=${process.env.DATABASE_URL ? "postgres" : "json"}`
+    );
+
     await initializeDatabase();
+    const initDiagnostics = getInitializationDiagnostics();
+    console.log(
+      `[startup] database_initialized=${initDiagnostics.initialized} schema_initialized=${initDiagnostics.schemaInitialized}`
+    );
 
     try {
       const result = await ensureBootstrapAdminExists("startup_bootstrap");
       if (result.created) {
-        console.log(`Bootstrap admin created: ${result.admin.email}`);
+        console.log(`[startup] bootstrap_admin=created email=${result.admin.email}`);
+      } else {
+        console.log(`[startup] bootstrap_admin=skipped reason=${result.reason}`);
       }
     } catch (error) {
       console.error(`Bootstrap admin setup failed: ${error.message}`);
@@ -33,8 +49,15 @@ async function startServer() {
     app.use(express.json());
     app.use(express.static(join(__dirname, "../client")));
 
-    app.get("/health", (req, res) => {
-      res.type("text").send("TimeClock API running");
+    app.get("/health", async (req, res) => {
+      const dbConnected = await checkDatabaseConnected();
+      res.json({
+        status: "ok",
+        environment,
+        storageMode: getStorageMode(),
+        databaseConnected: dbConnected,
+        timestamp: new Date().toISOString(),
+      });
     });
 
     app.use("/api/auth", createAuthRouter());

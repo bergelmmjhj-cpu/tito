@@ -44,10 +44,12 @@ const mapCoordinatesTextEl = document.getElementById("mapCoordinatesText");
 
 const showTimeClockBtnEl = document.getElementById("showTimeClockBtn");
 const showWorkplacesBtnEl = document.getElementById("showWorkplacesBtn");
+const showUsersBtnEl = document.getElementById("showUsersBtn");
 const showTimesheetsBtnEl = document.getElementById("showTimesheetsBtn");
 const timeClockSectionEl = document.getElementById("timeClockSection");
 const historySectionEl = document.getElementById("historySection");
 const workplacesSectionEl = document.getElementById("workplacesSection");
+const usersSectionEl = document.getElementById("usersSection");
 const timesheetsSectionEl = document.getElementById("timesheetsSection");
 const refreshWorkplacesBtnEl = document.getElementById("refreshWorkplacesBtn");
 const workplaceFormEl = document.getElementById("workplaceForm");
@@ -74,6 +76,18 @@ const assignWorkplaceSelectEl = document.getElementById("assignWorkplaceSelect")
 const saveAssignmentBtnEl = document.getElementById("saveAssignmentBtn");
 const assignmentErrorEl = document.getElementById("assignmentError");
 const workerAssignmentsBodyEl = document.getElementById("workerAssignmentsBody");
+const adminUserFormEl = document.getElementById("adminUserForm");
+const adminUserFirstNameEl = document.getElementById("adminUserFirstName");
+const adminUserLastNameEl = document.getElementById("adminUserLastName");
+const adminUserEmailEl = document.getElementById("adminUserEmail");
+const adminUserStaffIdEl = document.getElementById("adminUserStaffId");
+const adminUserPasswordEl = document.getElementById("adminUserPassword");
+const adminUserConfirmPasswordEl = document.getElementById("adminUserConfirmPassword");
+const adminUserRoleEl = document.getElementById("adminUserRole");
+const adminUsersBodyEl = document.getElementById("adminUsersBody");
+const adminUserErrorEl = document.getElementById("adminUserError");
+const adminUserMessageEl = document.getElementById("adminUserMessage");
+const refreshUsersBtnEl = document.getElementById("refreshUsersBtn");
 
 const TOKEN_KEY = "timeclock_token";
 const GEO_OPTIONS = { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 };
@@ -105,6 +119,10 @@ const LOCATION_REQUIRED = (() => {
 function setError(el, message) {
   el.textContent = message || "";
   el.classList.toggle("hidden", !message);
+}
+
+function setInfo(el, message) {
+  el.textContent = message || "";
 }
 
 function formatDateTime(value) {
@@ -421,6 +439,110 @@ function renderWorkerAssignments(workers) {
     .join("");
 }
 
+function renderAdminUsers(users) {
+  if (!Array.isArray(users) || users.length === 0) {
+    adminUsersBodyEl.innerHTML = '<tr><td colspan="7" class="muted">No users available.</td></tr>';
+    return;
+  }
+
+  adminUsersBodyEl.innerHTML = users
+    .map((user) => {
+      const roleLabel = user.role === "admin" ? "Admin" : "Worker";
+      const statusLabel = user.isActive === false ? "Inactive" : "Active";
+      const toggleActionLabel = user.isActive === false ? "Activate" : "Deactivate";
+      const roleActionLabel = user.role === "admin" ? "Set Worker" : "Promote Admin";
+
+      return `
+        <tr>
+          <td>${user.name}</td>
+          <td>${user.email}</td>
+          <td>${user.staffId}</td>
+          <td>${roleLabel}</td>
+          <td>${formatDateTime(user.createdAt)}</td>
+          <td>${statusLabel}</td>
+          <td>
+            <button class="ghost tiny" data-action="toggle-active" data-id="${user.id}" data-active="${user.isActive !== false}">${toggleActionLabel}</button>
+            <button class="ghost tiny" data-action="toggle-role" data-id="${user.id}" data-role="${user.role}">${roleActionLabel}</button>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+async function loadAdminUsers() {
+  if (currentUser?.role !== "admin") return;
+  const data = await apiFetch("/api/admin/users");
+  renderAdminUsers(data?.users || []);
+}
+
+async function createManagedUser(event) {
+  event.preventDefault();
+  setError(adminUserErrorEl, "");
+  setInfo(adminUserMessageEl, "");
+
+  const payload = {
+    firstName: adminUserFirstNameEl.value.trim(),
+    lastName: adminUserLastNameEl.value.trim(),
+    email: adminUserEmailEl.value.trim(),
+    staffId: adminUserStaffIdEl.value.trim(),
+    password: adminUserPasswordEl.value,
+    confirmPassword: adminUserConfirmPasswordEl.value,
+    role: adminUserRoleEl.value,
+  };
+
+  try {
+    await apiFetch("/api/admin/users", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+
+    adminUserFormEl.reset();
+    adminUserRoleEl.value = "worker";
+    setInfo(adminUserMessageEl, "User created successfully.");
+    await loadAdminUsers();
+  } catch (error) {
+    setError(adminUserErrorEl, error.message);
+  }
+}
+
+async function handleAdminUsersTableClick(event) {
+  const button = event.target.closest("button[data-action]");
+  if (!button) return;
+
+  setError(adminUserErrorEl, "");
+  setInfo(adminUserMessageEl, "");
+
+  const userId = button.dataset.id;
+  const action = button.dataset.action;
+
+  try {
+    if (action === "toggle-active") {
+      const currentlyActive = button.dataset.active === "true";
+      await apiFetch(`/api/admin/users/${userId}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ isActive: !currentlyActive }),
+      });
+      setInfo(adminUserMessageEl, `User ${currentlyActive ? "deactivated" : "activated"} successfully.`);
+      await loadAdminUsers();
+      return;
+    }
+
+    if (action === "toggle-role") {
+      const currentRole = button.dataset.role;
+      const nextRole = currentRole === "admin" ? "worker" : "admin";
+      await apiFetch(`/api/admin/users/${userId}/role`, {
+        method: "PATCH",
+        body: JSON.stringify({ role: nextRole }),
+      });
+      setInfo(adminUserMessageEl, `User role updated to ${nextRole}.`);
+      await loadAdminUsers();
+    }
+  } catch (error) {
+    setError(adminUserErrorEl, error.message);
+  }
+}
+
 function setAuthMode(mode) {
   const loginMode = mode === "login";
   loginFormViewEl.classList.toggle("hidden", !loginMode);
@@ -433,9 +555,11 @@ function setAuthMode(mode) {
 
 function showAdminSections(isAdmin) {
   showWorkplacesBtnEl.classList.toggle("hidden", !isAdmin);
+  showUsersBtnEl.classList.toggle("hidden", !isAdmin);
   showTimesheetsBtnEl.classList.toggle("hidden", !isAdmin);
   if (!isAdmin) {
     workplacesSectionEl.classList.add("hidden");
+    usersSectionEl.classList.add("hidden");
     timesheetsSectionEl.classList.add("hidden");
     timeClockSectionEl.classList.remove("hidden");
     historySectionEl.classList.remove("hidden");
@@ -444,11 +568,13 @@ function showAdminSections(isAdmin) {
 
 function openScreen(name) {
   const isWorkplaces = name === "workplaces";
+  const isUsers = name === "users";
   const isTimesheets = name === "timesheets";
   workplacesSectionEl.classList.toggle("hidden", !isWorkplaces);
+  usersSectionEl.classList.toggle("hidden", !isUsers);
   timesheetsSectionEl.classList.toggle("hidden", !isTimesheets);
-  timeClockSectionEl.classList.toggle("hidden", isWorkplaces || isTimesheets);
-  historySectionEl.classList.toggle("hidden", isWorkplaces || isTimesheets);
+  timeClockSectionEl.classList.toggle("hidden", isWorkplaces || isUsers || isTimesheets);
+  historySectionEl.classList.toggle("hidden", isWorkplaces || isUsers || isTimesheets);
 }
 
 async function apiFetch(path, options = {}) {
@@ -814,6 +940,10 @@ showWorkplacesBtnEl.addEventListener("click", () => {
     setError(workplaceErrorEl, error.message)
   );
 });
+showUsersBtnEl.addEventListener("click", () => {
+  openScreen("users");
+  loadAdminUsers().catch((error) => setError(adminUserErrorEl, error.message));
+});
 showTimesheetsBtnEl.addEventListener("click", () => {
   openScreen("timesheets");
   initTimesheetsScreen().catch((error) => setError(timesheetErrorEl, error.message));
@@ -845,6 +975,10 @@ refreshWorkplacesBtnEl.addEventListener("click", () => {
   );
 });
 
+refreshUsersBtnEl.addEventListener("click", () => {
+  loadAdminUsers().catch((error) => setError(adminUserErrorEl, error.message));
+});
+
 saveAssignmentBtnEl.addEventListener("click", () => {
   saveWorkerAssignment();
 });
@@ -856,6 +990,10 @@ resetWorkplaceBtnEl.addEventListener("click", () => {
 });
 workplacesBodyEl.addEventListener("click", (event) => {
   handleWorkplaceTableClick(event);
+});
+adminUserFormEl.addEventListener("submit", createManagedUser);
+adminUsersBodyEl.addEventListener("click", (event) => {
+  handleAdminUsersTableClick(event);
 });
 historyBodyEl.addEventListener("click", (event) => {
   const row = event.target.closest("tr[data-latitude][data-longitude]");

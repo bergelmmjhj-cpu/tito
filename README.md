@@ -60,9 +60,9 @@ npm start
 
 Default users after first startup:
 
-- Admin: `admin@hotel.local` / `admin12345`
-- Worker: `maria@hotel.local` / `password123`
-- Worker: `john@hotel.local` / `password123`
+- Admin: `admin@hotel.local` / `<set-via-env>`
+- Worker: `<create-via-signup>` / `<user-defined-password>`
+- Worker: `<create-via-signup>` / `<user-defined-password>`
 
 Admin bootstrap is created from environment values only when no admin user exists.
 
@@ -70,7 +70,7 @@ Recommended environment variables:
 
 ```bash
 ADMIN_EMAIL=admin@hotel.local
-ADMIN_PASSWORD=admin12345
+ADMIN_PASSWORD=<set-strong-password>
 ADMIN_FIRST_NAME=System
 ADMIN_LAST_NAME=Admin
 ADMIN_STAFF_ID=A1000
@@ -80,7 +80,7 @@ Backward-compatible aliases are still supported:
 
 ```bash
 DEFAULT_ADMIN_EMAIL=admin@hotel.local
-DEFAULT_ADMIN_PASSWORD=admin12345
+DEFAULT_ADMIN_PASSWORD=<set-strong-password>
 ```
 
 If you keep values in `server/.env`, run node with `--env-file`:
@@ -176,13 +176,13 @@ curl http://localhost:3000/health
 
 - Staff ID: `W1001`
 - Email: `maria@hotel.local`
-- Password: `password123`
+- Password: `<user-defined-password>`
 
 Also available:
 
 - Staff ID: `W1002`
 - Email: `john@hotel.local`
-- Password: `password123`
+- Password: `<user-defined-password>`
 
 ## Database schema and migration
 
@@ -282,7 +282,7 @@ Existing v1 routes are still available:
 
 1. Start backend with `npm start`
 2. Open `http://localhost:3000`
-3. Login with `W1001` / `password123`
+3. Login with a valid staff ID / password pair created in your environment
 4. Click Clock In
 5. Click Start Break
 6. Click End Break

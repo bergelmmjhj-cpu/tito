@@ -11,6 +11,12 @@ import {
   getTimesheetDetailController,
   listTimesheetsController,
 } from "../controllers/adminTimesheetController.js";
+import {
+  createAdminUserController,
+  listAdminUsersController,
+  setAdminUserRoleController,
+  setAdminUserStatusController,
+} from "../controllers/adminUserController.js";
 
 export function createAdminRoutes() {
   const router = Router();
@@ -21,6 +27,11 @@ export function createAdminRoutes() {
   router.get("/workers", listWorkersController);
   router.patch("/workers/:workerUserId/workplace", assignWorkerWorkplaceController);
   router.get("/assignable-workplaces", listAssignableWorkplacesController);
+
+  router.get("/users", listAdminUsersController);
+  router.post("/users", createAdminUserController);
+  router.patch("/users/:userId/status", setAdminUserStatusController);
+  router.patch("/users/:userId/role", setAdminUserRoleController);
 
   // Timesheets — export must be registered before the :shiftId param route
   router.get("/timesheets/export/csv", exportTimesheetsCsvController);

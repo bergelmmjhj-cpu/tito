@@ -7,7 +7,7 @@ const DEFAULT_BOOTSTRAP_ADMIN = {
   firstName: "System",
   lastName: "Admin",
   email: "admin@hotel.local",
-  password: "admin12345",
+  password: "",
   staffId: "A1000",
 };
 
@@ -82,6 +82,13 @@ function buildUser({
 function createSeedUsers() {
   const adminSeed = getBootstrapAdminSeed();
 
+  const hasValidPassword =
+    typeof adminSeed.password === "string" && adminSeed.password.length >= 8;
+
+  if (!hasValidPassword) {
+    return [];
+  }
+
   return [
     buildUser({
       firstName: adminSeed.firstName,
@@ -90,22 +97,6 @@ function createSeedUsers() {
       staffId: adminSeed.staffId,
       role: "admin",
       password: adminSeed.password,
-    }),
-    buildUser({
-      firstName: "Maria",
-      lastName: "Cruz",
-      email: "maria@hotel.local",
-      staffId: "W1001",
-      role: "worker",
-      password: "password123",
-    }),
-    buildUser({
-      firstName: "John",
-      lastName: "Rivera",
-      email: "john@hotel.local",
-      staffId: "W1002",
-      role: "worker",
-      password: "password123",
     }),
   ];
 }
@@ -174,16 +165,21 @@ export function migrateDatabase(db) {
   const hasAdmin = safe.users.some((user) => user.role === "admin");
   if (!hasAdmin) {
     const adminSeed = getBootstrapAdminSeed();
-    safe.users.unshift(
-      buildUser({
-        firstName: adminSeed.firstName,
-        lastName: adminSeed.lastName,
-        email: adminSeed.email,
-        staffId: adminSeed.staffId,
-        role: "admin",
-        password: adminSeed.password,
-      })
-    );
+    const hasValidPassword =
+      typeof adminSeed.password === "string" && adminSeed.password.length >= 8;
+
+    if (hasValidPassword) {
+      safe.users.unshift(
+        buildUser({
+          firstName: adminSeed.firstName,
+          lastName: adminSeed.lastName,
+          email: adminSeed.email,
+          staffId: adminSeed.staffId,
+          role: "admin",
+          password: adminSeed.password,
+        })
+      );
+    }
   }
 
   safe.workplaces = safe.workplaces.map((item) => ({

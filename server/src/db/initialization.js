@@ -12,6 +12,9 @@ const DATA_DIR = path.resolve(__dirname, "../../data");
 const DB_FILE = path.resolve(DATA_DIR, "db.json");
 
 let isInitialized = false;
+let storageMode = "json";
+let schemaInitialized = false;
+let lastInitializationError = null;
 
 export async function initializeDatabase() {
   if (isInitialized) return;
@@ -20,20 +23,32 @@ export async function initializeDatabase() {
 
   // Use DATABASE_URL if available, otherwise use JSON fallback
   const dbUrl = process.env.DATABASE_URL;
+  const isProduction = String(process.env.NODE_ENV || "").toLowerCase() === "production";
 
   if (!dbUrl) {
+    if (isProduction) {
+      const error = "DATABASE_URL is required in production. JSON fallback is disabled.";
+      lastInitializationError = error;
+      throw new Error(error);
+    }
+
+    storageMode = "json";
+    schemaInitialized = false;
+    lastInitializationError = null;
     console.warn("DATABASE_URL not set. Using JSON file storage (development mode).");
     isInitialized = true;
     return;
   }
 
   try {
+    storageMode = "postgres";
     // Initialize PostgreSQL connection pool
     initializePool();
     console.log("Connected to PostgreSQL");
 
     // Create schema if not exists
     await initializeSchema();
+    schemaInitialized = true;
 
     // Check if we need to migrate data from JSON
     const schemaVersion = await getSchemaVersion();
@@ -44,8 +59,11 @@ export async function initializeDatabase() {
     }
 
     isInitialized = true;
+    lastInitializationError = null;
     console.log("Database initialization complete");
   } catch (error) {
+    lastInitializationError = error?.message || "unknown_error";
+    schemaInitialized = false;
     console.error("Database initialization failed:", error.message);
     throw error;
   }
@@ -231,6 +249,31 @@ async function migrateFromJsonIfExists() {
 
 export function isDatabaseReady() {
   return isInitialized && process.env.DATABASE_URL;
+}
+
+export function getStorageMode() {
+  return storageMode;
+}
+
+export function getInitializationDiagnostics() {
+  return {
+    initialized: isInitialized,
+    storageMode,
+    schemaInitialized,
+    hasDatabaseUrl: Boolean(process.env.DATABASE_URL),
+    lastInitializationError,
+  };
+}
+
+export async function checkDatabaseConnected() {
+  if (!isDatabaseReady()) return false;
+
+  try {
+    const result = await query("SELECT 1 AS ok");
+    return Boolean(result?.rows?.[0]?.ok === 1 || result?.rows?.[0]?.ok === "1");
+  } catch {
+    return false;
+  }
 }
 
 // Fallback functions for when DATABASE_URL is not set (backward compatibility)

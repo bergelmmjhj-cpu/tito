@@ -85,6 +85,7 @@
         <div class="actions nav-actions">
           <button id="showTimeClockBtn" type="button" class="ghost">Time Clock</button>
           <button id="showWorkplacesBtn" type="button" class="ghost hidden">Workplaces</button>
+          <button id="showUsersBtn" type="button" class="ghost hidden">Users</button>
           <button id="showTimesheetsBtn" type="button" class="ghost hidden">Timesheets</button>
         </div>
       </section>
@@ -312,10 +313,60 @@
         </div>
       </section>
 
+      <section id="usersSection" class="card hidden">
+        <div class="topbar">
+          <h2>User Management (Admin)</h2>
+          <button id="refreshUsersBtn" type="button" class="ghost">Refresh</button>
+        </div>
+        <p class="muted">Create admin/worker users and manage account access.</p>
+
+        <form id="adminUserForm" class="workplace-form">
+          <label>First Name<input id="adminUserFirstName" type="text" required /></label>
+          <label>Last Name<input id="adminUserLastName" type="text" required /></label>
+          <label>Email<input id="adminUserEmail" type="email" required /></label>
+          <label>Staff ID<input id="adminUserStaffId" type="text" required /></label>
+          <label>Password<input id="adminUserPassword" type="password" minlength="8" required /></label>
+          <label>Confirm Password<input id="adminUserConfirmPassword" type="password" minlength="8" required /></label>
+          <label>
+            Role
+            <select id="adminUserRole">
+              <option value="worker">Worker</option>
+              <option value="admin">Admin</option>
+            </select>
+          </label>
+
+          <p id="adminUserMessage" class="muted"></p>
+          <p id="adminUserError" class="error hidden"></p>
+
+          <div class="actions">
+            <button id="createAdminUserBtn" type="submit">Create User</button>
+          </div>
+        </form>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Staff ID</th>
+                <th>Role</th>
+                <th>Created</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="adminUsersBody">
+              <tr><td colspan="7" class="muted">No users available.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
     </section>
 
     <footer class="footer">
-      <small>Demo worker: W1001 / password123</small>
+      <small>Configured instance for staff attendance and admin operations.</small>
     </footer>
   </main>
   <script

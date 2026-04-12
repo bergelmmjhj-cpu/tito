@@ -57,6 +57,14 @@ export async function ensureBootstrapAdminExists(source = "startup") {
     );
   }
 
+  const staffConflict = await findUserByStaffId(config.staffId);
+  if (staffConflict) {
+    throw new HttpError(
+      409,
+      `Cannot bootstrap admin: staff ID ${config.staffId} is already used by another user`
+    );
+  }
+
   const now = new Date().toISOString();
   const { salt, hash } = createPasswordHash(config.password);
   const adminUser = await createUser({
