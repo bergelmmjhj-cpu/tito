@@ -46,20 +46,50 @@ export async function ensureBootstrapAdminExists(source = "startup") {
   const existingAdmin = users.find((user) => user.role === "admin");
 
   if (existingAdmin) {
-    // If the env-configured email matches the existing admin, sync the password
-    // so that changing ADMIN_PASSWORD in the environment takes effect on redeploy.
-    if (
-      existingAdmin.email &&
-      existingAdmin.email.toLowerCase() === config.email.toLowerCase()
-    ) {
+    const existingEmail = (existingAdmin.email || "").toLowerCase();
+    const configEmail = config.email.toLowerCase();
+    const emailMatchesEnv = existingEmail === configEmail;
+    // Treat the built-in dev placeholder as something we should always replace.
+    const isPlaceholder = existingEmail === "admin@hotel.local";
+
+    // Diagnostic log — shows first 3 chars of existing admin email so we can
+    // confirm which account is in the DB without exposing the full address.
+    const emailHint = existingAdmin.email
+      ? `${existingAdmin.email.slice(0, 3)}***@${existingAdmin.email.split("@")[1] || "?"}`
+      : "unknown";
+    console.log(`[bootstrap] found_admin email_hint=${emailHint} match_env=${emailMatchesEnv} is_placeholder=${isPlaceholder}`);
+
+    if (emailMatchesEnv || isPlaceholder) {
+      const patch = {};
+
+      // Always sync the password from env vars.
       const { salt, hash } = createPasswordHash(config.password);
-      await updateUserById(existingAdmin.id, {
-        passwordSalt: salt,
-        passwordHash: hash,
-        updatedAt: new Date().toISOString(),
-      });
-      return { created: false, reason: "password_synced", admin: sanitizeUser(existingAdmin) };
+      patch.passwordSalt = salt;
+      patch.passwordHash = hash;
+
+      if (isPlaceholder && !emailMatchesEnv) {
+        // Moving from placeholder to real admin — check for conflicts first.
+        const emailConflict = await findUserByEmail(config.email);
+        if (emailConflict && emailConflict.id !== existingAdmin.id) {
+          return { created: false, reason: "admin_exists", admin: null };
+        }
+
+        const staffConflict = await findUserByStaffId(config.staffId);
+        if (!staffConflict || staffConflict.id === existingAdmin.id) {
+          patch.staffId = config.staffId;
+        }
+
+        patch.email = config.email;
+        patch.firstName = config.firstName;
+        patch.lastName = config.lastName;
+        patch.name = `${config.firstName} ${config.lastName}`;
+      }
+
+      const updatedUser = await updateUserById(existingAdmin.id, patch);
+      const reason = isPlaceholder && !emailMatchesEnv ? "placeholder_replaced" : "password_synced";
+      return { created: false, reason, admin: sanitizeUser(updatedUser || existingAdmin) };
     }
+
     return { created: false, reason: "admin_exists", admin: null };
   }
 
