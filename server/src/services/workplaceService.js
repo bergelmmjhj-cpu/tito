@@ -109,13 +109,13 @@ function sortByUpdatedDesc(items) {
     .sort((a, b) => Date.parse(b.updatedAt || "") - Date.parse(a.updatedAt || ""));
 }
 
-export function getWorkplaces(includeInactive = true) {
-  const all = listWorkplaces();
+export async function getWorkplaces(includeInactive = true) {
+  const all = await listWorkplaces();
   const filtered = includeInactive ? all : all.filter((item) => item.active !== false);
   return sortByUpdatedDesc(filtered);
 }
 
-export function addWorkplace(payload, actor) {
+export async function addWorkplace(payload, actor) {
   const now = new Date().toISOString();
   const clean = normalizeWorkplacePayload(payload, { partial: false });
 
@@ -135,25 +135,25 @@ export function addWorkplace(payload, actor) {
   });
 }
 
-export function editWorkplace(workplaceId, payload) {
-  const existing = findWorkplaceById(workplaceId);
+export async function editWorkplace(workplaceId, payload) {
+  const existing = await findWorkplaceById(workplaceId);
   if (!existing) throw new HttpError(404, "Workplace not found");
 
   const patch = normalizeWorkplacePayload(payload, { partial: true });
   patch.updatedAt = new Date().toISOString();
 
-  const updated = updateWorkplace(workplaceId, patch);
+  const updated = await updateWorkplace(workplaceId, patch);
   if (!updated) throw new HttpError(404, "Workplace not found");
   return updated;
 }
 
-export function setWorkplaceActive(workplaceId, active) {
+export async function setWorkplaceActive(workplaceId, active) {
   if (typeof active !== "boolean") throw new HttpError(400, "active must be a boolean");
 
-  const existing = findWorkplaceById(workplaceId);
+  const existing = await findWorkplaceById(workplaceId);
   if (!existing) throw new HttpError(404, "Workplace not found");
 
-  const updated = updateWorkplace(workplaceId, {
+  const updated = await updateWorkplace(workplaceId, {
     active,
     updatedAt: new Date().toISOString(),
   });
@@ -162,8 +162,8 @@ export function setWorkplaceActive(workplaceId, active) {
   return updated;
 }
 
-export function getWorkplaceById(workplaceId) {
-  const workplace = findWorkplaceById(workplaceId);
+export async function getWorkplaceById(workplaceId) {
+  const workplace = await findWorkplaceById(workplaceId);
   if (!workplace) throw new HttpError(404, "Workplace not found");
   return workplace;
 }

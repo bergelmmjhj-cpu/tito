@@ -2,9 +2,9 @@ import { login, registerWorker, requireUserFromToken } from "../services/authSer
 import { toHttpError } from "../utils/errors.js";
 import { parseBearerToken } from "../utils/auth.js";
 
-export function registerController(req, res) {
+export async function registerController(req, res) {
   try {
-    const result = registerWorker(req.body || {});
+    const result = await registerWorker(req.body || {});
     res.status(201).json(result);
   } catch (error) {
     const err = toHttpError(error);
@@ -12,10 +12,10 @@ export function registerController(req, res) {
   }
 }
 
-export function loginController(req, res) {
+export async function loginController(req, res) {
   try {
     const { identifier, password } = req.body || {};
-    const result = login(identifier, password);
+    const result = await login(identifier, password);
     res.json(result);
   } catch (error) {
     const err = toHttpError(error);
@@ -23,10 +23,10 @@ export function loginController(req, res) {
   }
 }
 
-export function meController(req, res) {
+export async function meController(req, res) {
   try {
     const token = parseBearerToken(req);
-    const user = requireUserFromToken(token);
+    const user = await requireUserFromToken(token);
     res.json({ user });
   } catch (error) {
     const err = toHttpError(error);

@@ -44,9 +44,11 @@ const mapCoordinatesTextEl = document.getElementById("mapCoordinatesText");
 
 const showTimeClockBtnEl = document.getElementById("showTimeClockBtn");
 const showWorkplacesBtnEl = document.getElementById("showWorkplacesBtn");
+const showTimesheetsBtnEl = document.getElementById("showTimesheetsBtn");
 const timeClockSectionEl = document.getElementById("timeClockSection");
 const historySectionEl = document.getElementById("historySection");
 const workplacesSectionEl = document.getElementById("workplacesSection");
+const timesheetsSectionEl = document.getElementById("timesheetsSection");
 const refreshWorkplacesBtnEl = document.getElementById("refreshWorkplacesBtn");
 const workplaceFormEl = document.getElementById("workplaceForm");
 const workplaceIdEl = document.getElementById("workplaceId");
@@ -431,8 +433,10 @@ function setAuthMode(mode) {
 
 function showAdminSections(isAdmin) {
   showWorkplacesBtnEl.classList.toggle("hidden", !isAdmin);
+  showTimesheetsBtnEl.classList.toggle("hidden", !isAdmin);
   if (!isAdmin) {
     workplacesSectionEl.classList.add("hidden");
+    timesheetsSectionEl.classList.add("hidden");
     timeClockSectionEl.classList.remove("hidden");
     historySectionEl.classList.remove("hidden");
   }
@@ -440,9 +444,11 @@ function showAdminSections(isAdmin) {
 
 function openScreen(name) {
   const isWorkplaces = name === "workplaces";
+  const isTimesheets = name === "timesheets";
   workplacesSectionEl.classList.toggle("hidden", !isWorkplaces);
-  timeClockSectionEl.classList.toggle("hidden", isWorkplaces);
-  historySectionEl.classList.toggle("hidden", isWorkplaces);
+  timesheetsSectionEl.classList.toggle("hidden", !isTimesheets);
+  timeClockSectionEl.classList.toggle("hidden", isWorkplaces || isTimesheets);
+  historySectionEl.classList.toggle("hidden", isWorkplaces || isTimesheets);
 }
 
 async function apiFetch(path, options = {}) {
@@ -808,6 +814,10 @@ showWorkplacesBtnEl.addEventListener("click", () => {
     setError(workplaceErrorEl, error.message)
   );
 });
+showTimesheetsBtnEl.addEventListener("click", () => {
+  openScreen("timesheets");
+  initTimesheetsScreen().catch((error) => setError(timesheetErrorEl, error.message));
+});
 
 clockInBtnEl.addEventListener("click", () => {
   doAction("clock_in").catch((error) => setError(actionErrorEl, error.message));
@@ -861,8 +871,318 @@ historyBodyEl.addEventListener("click", (event) => {
   );
 });
 
+// ─── Admin Timesheets ────────────────────────────────────────────────────────
+
+const tsDateFromEl = document.getElementById("tsDateFrom");
+const tsDateToEl = document.getElementById("tsDateTo");
+const tsSearchEl = document.getElementById("tsSearch");
+const tsWorkplaceFilterEl = document.getElementById("tsWorkplaceFilter");
+const tsStatusFilterEl = document.getElementById("tsStatusFilter");
+const applyTimesheetFiltersBtnEl = document.getElementById("applyTimesheetFiltersBtn");
+const clearTimesheetFiltersBtnEl = document.getElementById("clearTimesheetFiltersBtn");
+const timesheetsBodyEl = document.getElementById("timesheetsBody");
+const timesheetsPaginationEl = document.getElementById("timesheetsPagination");
+const timesheetErrorEl = document.getElementById("timesheetError");
+const exportTimesheetsCsvBtnEl = document.getElementById("exportTimesheetsCsvBtn");
+const refreshTimesheetsBtnEl = document.getElementById("refreshTimesheetsBtn");
+const timesheetDetailPanelEl = document.getElementById("timesheetDetailPanel");
+const timesheetDetailContentEl = document.getElementById("timesheetDetailContent");
+const closeTimesheetDetailBtnEl = document.getElementById("closeTimesheetDetailBtn");
+
+let timesheetsCurrentPage = 1;
+let timesheetsLastFilters = {};
+
+function buildTimesheetQueryString(filters, page) {
+  const params = new URLSearchParams();
+  if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
+  if (filters.dateTo) params.set("dateTo", filters.dateTo);
+  if (filters.search) params.set("search", filters.search);
+  if (filters.workplaceId) params.set("workplaceId", filters.workplaceId);
+  if (filters.status) params.set("status", filters.status);
+  params.set("page", String(page || 1));
+  params.set("limit", "50");
+  return params.toString();
+}
+
+function readTimesheetFilters() {
+  return {
+    dateFrom: tsDateFromEl.value || "",
+    dateTo: tsDateToEl.value || "",
+    search: tsSearchEl.value.trim(),
+    workplaceId: tsWorkplaceFilterEl.value || "",
+    status: tsStatusFilterEl.value || "",
+  };
+}
+
+function clearTimesheetFilters() {
+  tsDateFromEl.value = "";
+  tsDateToEl.value = "";
+  tsSearchEl.value = "";
+  tsWorkplaceFilterEl.value = "";
+  tsStatusFilterEl.value = "";
+}
+
+function statusBadgeHtml(status) {
+  if (status === "completed") return `<span class="status-badge-completed">Completed</span>`;
+  if (status === "open_shift") return `<span class="status-badge-open">Open shift</span>`;
+  if (status === "missing_break_end") return `<span class="status-badge-missing">Missing break end</span>`;
+  return `<span class="status-badge-warn">${status || "—"}</span>`;
+}
+
+function formatBreakList(arr) {
+  if (!Array.isArray(arr) || arr.length === 0) return "—";
+  return arr.map(formatDateTime).join("<br>");
+}
+
+function renderTimesheets(timesheets) {
+  if (!Array.isArray(timesheets) || timesheets.length === 0) {
+    timesheetsBodyEl.innerHTML = `<tr><td colspan="12" class="muted">No timesheets found.</td></tr>`;
+    return;
+  }
+
+  timesheetsBodyEl.innerHTML = timesheets.map((ts) => {
+    const noLocFlag = ts.noLocation ? ` <span class="status-badge-missing" title="No location">&#9888; No loc</span>` : "";
+    const lowAccFlag = ts.lowAccuracy ? ` <span class="status-badge-warn" title="Low accuracy (&gt;50m)">&#9888; Low acc</span>` : "";
+    const locationCell = ts.locationSummary
+      ? `${ts.locationSummary}${noLocFlag}${lowAccFlag}`
+      : `<span class="muted">—</span>${noLocFlag}`;
+
+    return `
+      <tr class="ts-row" data-shiftid="${ts.shiftId}">
+        <td>${ts.workerName || "—"}</td>
+        <td>${ts.workerStaffId || "—"}</td>
+        <td>${ts.date || "—"}</td>
+        <td>${statusBadgeHtml(ts.status)}</td>
+        <td>${formatDateTime(ts.clockInAt)}</td>
+        <td>${formatBreakList(ts.breakStartAt)}</td>
+        <td>${formatBreakList(ts.breakEndAt)}</td>
+        <td>${formatDateTime(ts.clockOutAt)}</td>
+        <td>${ts.totalHours != null ? ts.totalHours : "—"}</td>
+        <td>${ts.workplaceName || "—"}</td>
+        <td>${locationCell}</td>
+        <td>${ts.clockInNotes || ts.clockOutNotes || "—"}</td>
+      </tr>`;
+  }).join("");
+}
+
+function renderTimesheetsPagination(pagination) {
+  if (!pagination) {
+    timesheetsPaginationEl.innerHTML = "";
+    return;
+  }
+
+  const { total, page, limit, totalPages } = pagination;
+  const start = total === 0 ? 0 : (page - 1) * limit + 1;
+  const end = Math.min(page * limit, total);
+
+  timesheetsPaginationEl.innerHTML = `
+    <button id="tsPrevBtn" class="ghost small" ${page <= 1 ? "disabled" : ""}>&#8592; Prev</button>
+    <span>Showing ${start}&#8211;${end} of ${total}</span>
+    <button id="tsNextBtn" class="ghost small" ${page >= totalPages ? "disabled" : ""}>Next &#8594;</button>
+  `;
+
+  document.getElementById("tsPrevBtn").addEventListener("click", () => {
+    loadTimesheets(timesheetsLastFilters, page - 1);
+  });
+  document.getElementById("tsNextBtn").addEventListener("click", () => {
+    loadTimesheets(timesheetsLastFilters, page + 1);
+  });
+}
+
+async function loadTimesheets(filters, page) {
+  setError(timesheetErrorEl, "");
+  timesheetsLastFilters = filters;
+  timesheetsCurrentPage = page || 1;
+
+  const qs = buildTimesheetQueryString(filters, timesheetsCurrentPage);
+  const data = await apiFetch(`/api/admin/timesheets?${qs}`);
+  renderTimesheets(data?.timesheets || []);
+  renderTimesheetsPagination(data?.pagination || null);
+}
+
+async function populateWorkplaceFilter() {
+  try {
+    const data = await apiFetch("/api/admin/assignable-workplaces");
+    const workplaces = data?.workplaces || [];
+    const dynamics = tsWorkplaceFilterEl.querySelectorAll("option[data-dynamic]");
+    dynamics.forEach((o) => o.remove());
+    workplaces.forEach((wp) => {
+      const opt = document.createElement("option");
+      opt.value = wp.id;
+      opt.textContent = wp.name;
+      opt.dataset.dynamic = "1";
+      tsWorkplaceFilterEl.appendChild(opt);
+    });
+  } catch {
+    // non-critical — filters still work without workplace list
+  }
+}
+
+async function initTimesheetsScreen() {
+  setError(timesheetErrorEl, "");
+  clearTimesheetFilters();
+  timesheetDetailPanelEl.classList.add("hidden");
+  await populateWorkplaceFilter();
+  await loadTimesheets({}, 1);
+}
+
+function renderTimesheetDetail(detail) {
+  const field = (label, value) => `
+    <div class="detail-item">
+      <div class="label">${label}</div>
+      <div class="value">${value == null || value === "" ? "—" : value}</div>
+    </div>`;
+
+  const geofenceStr = detail.withinGeofence != null
+    ? (detail.withinGeofence ? "&#10003; Within" : "&#10007; Outside")
+    : "n/a";
+
+  const distanceStr = typeof detail.distanceMeters === "number"
+    ? `${detail.distanceMeters.toFixed(2)} m`
+    : "n/a";
+
+  const accuracyStr = typeof detail.locationAccuracy === "number"
+    ? `${detail.locationAccuracy.toFixed(1)} m`
+    : "n/a";
+
+  const summaryHtml = `
+    <div class="detail-grid">
+      ${field("Shift ID", detail.shiftId)}
+      ${field("Worker", detail.workerName)}
+      ${field("Staff ID", detail.workerStaffId)}
+      ${field("Email", detail.workerEmail)}
+      ${field("Date", detail.date)}
+      ${field("Status", detail.status)}
+      ${field("Clock In", formatDateTime(detail.clockInAt))}
+      ${field("Clock Out", formatDateTime(detail.clockOutAt))}
+      ${field("Total Hours", detail.totalHours != null ? detail.totalHours : "—")}
+      ${field("Workplace", detail.workplaceName)}
+      ${field("Geofence", geofenceStr)}
+      ${field("Distance", distanceStr)}
+      ${field("Location", detail.locationSummary || "—")}
+      ${field("Location Accuracy", accuracyStr)}
+      ${field("Clock-In Notes", detail.clockInNotes || "—")}
+      ${field("Clock-Out Notes", detail.clockOutNotes || "—")}
+    </div>`;
+
+  const actionsHtml = Array.isArray(detail.actions) && detail.actions.length > 0
+    ? `<h3 style="margin:12px 0 6px">Action History</h3>
+       <div class="table-wrap">
+         <table class="detail-actions-table">
+           <thead>
+             <tr>
+               <th>Action</th>
+               <th>Timestamp</th>
+               <th>Location</th>
+               <th>Accuracy</th>
+               <th>Captured At</th>
+               <th>Workplace</th>
+               <th>Distance</th>
+               <th>Within</th>
+               <th>Notes</th>
+             </tr>
+           </thead>
+           <tbody>
+             ${detail.actions.map((a) => {
+               const loc = a.location;
+               const locStr = loc && typeof loc.latitude === "number"
+                 ? `${loc.latitude.toFixed(5)}, ${loc.longitude.toFixed(5)}`
+                 : "—";
+               const accStr = loc && typeof loc.accuracy === "number"
+                 ? `${loc.accuracy.toFixed(1)} m`
+                 : "—";
+               const geo = a.geofence;
+               const distStr = geo && typeof geo.distanceMeters === "number"
+                 ? `${geo.distanceMeters.toFixed(2)} m`
+                 : "—";
+               const withinStr = geo && typeof geo.withinGeofence === "boolean"
+                 ? (geo.withinGeofence ? "&#10003;" : "&#10007;")
+                 : "—";
+               return `<tr>
+                 <td>${toActionLabel(a.actionType)}</td>
+                 <td>${formatDateTime(a.timestamp)}</td>
+                 <td>${locStr}</td>
+                 <td>${accStr}</td>
+                 <td>${formatDateTime(loc ? loc.capturedAt : null)}</td>
+                 <td>${geo ? (geo.workplaceName || "—") : "—"}</td>
+                 <td>${distStr}</td>
+                 <td>${withinStr}</td>
+                 <td>${a.notes || "—"}</td>
+               </tr>`;
+             }).join("")}
+           </tbody>
+         </table>
+       </div>`
+    : `<p class="muted">No action logs found for this shift.</p>`;
+
+  timesheetDetailContentEl.innerHTML = summaryHtml + actionsHtml;
+  timesheetDetailPanelEl.classList.remove("hidden");
+  timesheetDetailPanelEl.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function loadTimesheetDetail(shiftId) {
+  setError(timesheetErrorEl, "");
+  try {
+    const data = await apiFetch(`/api/admin/timesheets/${encodeURIComponent(shiftId)}`);
+    renderTimesheetDetail(data.timesheet);
+  } catch (error) {
+    setError(timesheetErrorEl, error.message);
+  }
+}
+
+applyTimesheetFiltersBtnEl.addEventListener("click", () => {
+  const filters = readTimesheetFilters();
+  loadTimesheets(filters, 1).catch((error) => setError(timesheetErrorEl, error.message));
+});
+
+clearTimesheetFiltersBtnEl.addEventListener("click", () => {
+  clearTimesheetFilters();
+  loadTimesheets({}, 1).catch((error) => setError(timesheetErrorEl, error.message));
+});
+
+refreshTimesheetsBtnEl.addEventListener("click", () => {
+  const filters = readTimesheetFilters();
+  loadTimesheets(filters, timesheetsCurrentPage).catch((error) => setError(timesheetErrorEl, error.message));
+});
+
+exportTimesheetsCsvBtnEl.addEventListener("click", () => {
+  const filters = readTimesheetFilters();
+  const params = new URLSearchParams();
+  if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
+  if (filters.dateTo) params.set("dateTo", filters.dateTo);
+  if (filters.search) params.set("search", filters.search);
+  if (filters.workplaceId) params.set("workplaceId", filters.workplaceId);
+  if (filters.status) params.set("status", filters.status);
+  const qs = params.toString();
+
+  apiFetch(`/api/admin/timesheets/export/csv${qs ? "?" + qs : ""}`, { headers: { Accept: "text/csv" } })
+    .then((text) => {
+      if (typeof text !== "string") throw new Error("Unexpected response from CSV export");
+      const blob = new Blob([text], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `timesheets-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+    })
+    .catch((error) => setError(timesheetErrorEl, error.message));
+});
+
+timesheetsBodyEl.addEventListener("click", (event) => {
+  const row = event.target.closest("tr.ts-row[data-shiftid]");
+  if (!row) return;
+  loadTimesheetDetail(row.dataset.shiftid);
+});
+
+closeTimesheetDetailBtnEl.addEventListener("click", () => {
+  timesheetDetailPanelEl.classList.add("hidden");
+});
+
+// ─── End Admin Timesheets ─────────────────────────────────────────────────────
+
 startLiveClock();
-setAuthMode("login");
 resetWorkplaceForm();
 showMapPlaceholder("Location not captured yet.", "Waiting for location");
 initFromSession();

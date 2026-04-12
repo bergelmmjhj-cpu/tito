@@ -69,8 +69,8 @@ function validatePassword(password, confirmPassword) {
   }
 }
 
-function generateStaffId() {
-  const users = listUsers();
+async function generateStaffId() {
+  const users = await listUsers();
   let max = 1000;
 
   for (const user of users) {
@@ -81,14 +81,14 @@ function generateStaffId() {
   }
 
   let candidate = max + 1;
-  while (findUserByStaffId(`W${candidate}`)) {
+  while (await findUserByStaffId(`W${candidate}`)) {
     candidate += 1;
   }
 
   return `W${candidate}`;
 }
 
-export function login(identifier, password) {
+export async function login(identifier, password) {
   if (typeof identifier !== "string" || !identifier.trim()) {
     throw new HttpError(400, "Staff ID or email is required");
   }
@@ -96,18 +96,18 @@ export function login(identifier, password) {
     throw new HttpError(400, "Password is required");
   }
 
-  const user = findUserByIdentifier(identifier);
+  const user = await findUserByIdentifier(identifier);
   if (!user) throw new HttpError(401, "Invalid login credentials");
   if (user.isActive === false) throw new HttpError(403, "User account is inactive");
 
   const ok = verifyPassword(password, user.passwordSalt, user.passwordHash);
   if (!ok) throw new HttpError(401, "Invalid login credentials");
 
-  const token = createSession(user.id);
+  const token = await createSession(user.id);
   return { token, user: sanitizeUser(user) };
 }
 
-export function registerWorker(payload = {}) {
+export async function registerWorker(payload = {}) {
   const firstName = normalizeName(payload.firstName, "First name");
   const lastName = normalizeName(payload.lastName, "Last name");
   const email = normalizeEmail(payload.email);
@@ -115,20 +115,20 @@ export function registerWorker(payload = {}) {
 
   validatePassword(payload.password, payload.confirmPassword);
 
-  if (findUserByEmail(email)) {
+  if (await findUserByEmail(email)) {
     throw new HttpError(409, "Email is already registered");
   }
 
   const { salt, hash } = createPasswordHash(payload.password);
   const now = new Date().toISOString();
-  const user = createUser({
+  const user = await createUser({
     id: crypto.randomUUID(),
     firstName,
     lastName,
     name: `${firstName} ${lastName}`,
     email,
     phone,
-    staffId: generateStaffId(),
+    staffId: await generateStaffId(),
     role: "worker",
     isActive: true,
     profile: {
@@ -141,15 +141,15 @@ export function registerWorker(payload = {}) {
     updatedAt: now,
   });
 
-  const token = createSession(user.id);
+  const token = await createSession(user.id);
   return { token, user: sanitizeUser(user) };
 }
 
-export function requireUserFromToken(token) {
+export async function requireUserFromToken(token) {
   if (!token) throw new HttpError(401, "Authentication required");
-  const userId = getSessionUserId(token);
+  const userId = await getSessionUserId(token);
   if (!userId) throw new HttpError(401, "Session expired or invalid");
-  const user = findUserById(userId);
+  const user = await findUserById(userId);
   if (!user) throw new HttpError(401, "Invalid session user");
   return sanitizeUser(user);
 }

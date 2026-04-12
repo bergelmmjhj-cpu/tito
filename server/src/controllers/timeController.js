@@ -5,9 +5,9 @@ import {
 } from "../services/timeService.js";
 import { toHttpError } from "../utils/errors.js";
 
-export function statusController(req, res) {
+export async function statusController(req, res) {
   try {
-    const data = getCurrentStatus(req.user.id);
+    const data = await getCurrentStatus(req.user.id);
     res.json({ user: req.user, ...data });
   } catch (error) {
     const err = toHttpError(error);
@@ -15,10 +15,10 @@ export function statusController(req, res) {
   }
 }
 
-export function actionController(req, res) {
+export async function actionController(req, res) {
   try {
     const { actionType, notes, location } = req.body || {};
-    const result = performAction(req.user.id, actionType, notes, location);
+    const result = await performAction(req.user.id, actionType, notes, location);
     res.json({
       user: req.user,
       ...result,
@@ -29,9 +29,9 @@ export function actionController(req, res) {
   }
 }
 
-export function historyController(req, res) {
+export async function historyController(req, res) {
   try {
-    const history = getAttendanceActionHistory(req.user.id);
+    const history = await getAttendanceActionHistory(req.user.id);
     res.json({ user: req.user, history });
   } catch (error) {
     const err = toHttpError(error);

@@ -58,18 +58,62 @@ cp server/.env.example server/.env   # optional
 npm start
 ```
 
-Default seeded users:
+Default users after first startup:
 
 - Admin: `admin@hotel.local` / `admin12345`
 - Worker: `maria@hotel.local` / `password123`
 - Worker: `john@hotel.local` / `password123`
 
-You can override default admin seed credentials in `server/.env`:
+Admin bootstrap is created from environment values only when no admin user exists.
+
+Recommended environment variables:
+
+```bash
+ADMIN_EMAIL=admin@hotel.local
+ADMIN_PASSWORD=admin12345
+ADMIN_FIRST_NAME=System
+ADMIN_LAST_NAME=Admin
+ADMIN_STAFF_ID=A1000
+```
+
+Backward-compatible aliases are still supported:
 
 ```bash
 DEFAULT_ADMIN_EMAIL=admin@hotel.local
 DEFAULT_ADMIN_PASSWORD=admin12345
 ```
+
+If you keep values in `server/.env`, run node with `--env-file`:
+
+```bash
+node --env-file=server/.env server/index.js
+```
+
+or export env vars before `npm start`.
+
+### Manual admin seed command
+
+If you want a direct one-time seed action:
+
+```bash
+npm run seed:admin
+```
+
+This command creates an admin only if no admin exists.
+
+### Admin login process
+
+After bootstrap/seed, log in from the normal login page using admin staff ID or email and password. The UI enables admin-only pages (Workplaces and Timesheets) based on the user role returned by auth.
+
+### Promote an existing worker to admin (optional)
+
+```bash
+npm run promote:admin -- W1001
+# or
+npm run promote:admin -- maria@hotel.local
+```
+
+This is a local script path only (not a public signup flow).
 
 ### 3) Open frontend
 
@@ -117,6 +161,7 @@ curl http://localhost:3000/health
 - Optional field: phone number.
 - Backend enforces unique email and password confirmation.
 - Passwords are hashed with PBKDF2 before storage.
+- Signup always creates `worker` users (admin cannot be created through public signup).
 - Successful signup auto-logs in the worker and starts a session token.
 
 ## Deployment notes

@@ -7,10 +7,10 @@ import {
 } from "../services/workplaceService.js";
 import { toHttpError } from "../utils/errors.js";
 
-export function listWorkplacesController(req, res) {
+export async function listWorkplacesController(req, res) {
   try {
     const includeInactive = req.query.includeInactive !== "false";
-    const workplaces = getWorkplaces(includeInactive);
+    const workplaces = await getWorkplaces(includeInactive);
     res.json({ workplaces });
   } catch (error) {
     const err = toHttpError(error);
@@ -18,9 +18,9 @@ export function listWorkplacesController(req, res) {
   }
 }
 
-export function getWorkplaceController(req, res) {
+export async function getWorkplaceController(req, res) {
   try {
-    const workplace = getWorkplaceById(req.params.workplaceId);
+    const workplace = await getWorkplaceById(req.params.workplaceId);
     res.json({ workplace });
   } catch (error) {
     const err = toHttpError(error);
@@ -28,9 +28,9 @@ export function getWorkplaceController(req, res) {
   }
 }
 
-export function createWorkplaceController(req, res) {
+export async function createWorkplaceController(req, res) {
   try {
-    const workplace = addWorkplace(req.body || {}, req.user);
+    const workplace = await addWorkplace(req.body || {}, req.user);
     res.status(201).json({ workplace });
   } catch (error) {
     const err = toHttpError(error);
@@ -38,9 +38,9 @@ export function createWorkplaceController(req, res) {
   }
 }
 
-export function updateWorkplaceController(req, res) {
+export async function updateWorkplaceController(req, res) {
   try {
-    const workplace = editWorkplace(req.params.workplaceId, req.body || {});
+    const workplace = await editWorkplace(req.params.workplaceId, req.body || {});
     res.json({ workplace });
   } catch (error) {
     const err = toHttpError(error);
@@ -48,9 +48,9 @@ export function updateWorkplaceController(req, res) {
   }
 }
 
-export function setWorkplaceStatusController(req, res) {
+export async function setWorkplaceStatusController(req, res) {
   try {
-    const workplace = setWorkplaceActive(req.params.workplaceId, req.body?.active);
+    const workplace = await setWorkplaceActive(req.params.workplaceId, req.body?.active);
     res.json({ workplace });
   } catch (error) {
     const err = toHttpError(error);

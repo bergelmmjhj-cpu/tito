@@ -26,10 +26,11 @@ function getActiveBreak(shift) {
   return null;
 }
 
-function resolveStatus(userId) {
-  const openShift = getOpenShiftForUser(userId);
+async function resolveStatus(userId) {
+  const openShift = await getOpenShiftForUser(userId);
   if (!openShift) {
-    const hasPastShifts = getAllShiftsForUser(userId).length > 0;
+    const allShifts = await getAllShiftsForUser(userId);
+    const hasPastShifts = allShifts.length > 0;
     return hasPastShifts ? "clocked_out" : "not_clocked_in";
   }
 
@@ -127,8 +128,8 @@ function parseActionLocation(actionType, location) {
   return validateLocationPayload(location);
 }
 
-function resolveWorkplaceAssignment(userId) {
-  const user = findUserById(userId);
+async function resolveWorkplaceAssignment(userId) {
+  const user = await findUserById(userId);
   if (!user) throw new HttpError(404, "User not found");
 
   const workplaceId = user.profile?.assignedWorkplaceId || null;
@@ -140,7 +141,7 @@ function resolveWorkplaceAssignment(userId) {
     };
   }
 
-  const workplace = findWorkplaceById(workplaceId);
+  const workplace = await findWorkplaceById(workplaceId);
   return {
     assignmentRequired: true,
     assignment: workplaceId,
@@ -148,8 +149,8 @@ function resolveWorkplaceAssignment(userId) {
   };
 }
 
-function evaluateGeofenceForAction(userId, location) {
-  const assignment = resolveWorkplaceAssignment(userId);
+async function evaluateGeofenceForAction(userId, location) {
+  const assignment = await resolveWorkplaceAssignment(userId);
   if (!assignment.assignmentRequired) {
     return {
       assignmentRequired: false,
@@ -206,12 +207,12 @@ function evaluateGeofenceForAction(userId, location) {
   };
 }
 
-export function getCurrentStatus(userId) {
-  const openShift = getOpenShiftForUser(userId);
-  const assignment = resolveWorkplaceAssignment(userId);
+export async function getCurrentStatus(userId) {
+  const openShift = await getOpenShiftForUser(userId);
+  const assignment = await resolveWorkplaceAssignment(userId);
 
   return {
-    status: resolveStatus(userId),
+    status: await resolveStatus(userId),
     openShift,
     workplaceAssignment: {
       assignedWorkplaceId: assignment.assignment || null,
@@ -221,12 +222,12 @@ export function getCurrentStatus(userId) {
   };
 }
 
-export function performAction(userId, actionType, notes, location) {
+export async function performAction(userId, actionType, notes, location) {
   const normalizedAction = typeof actionType === "string" ? actionType.trim() : "";
   const cleanNotes = validateNotes(notes);
   const cleanLocation = parseActionLocation(normalizedAction, location);
-  const geofenceEvaluation = evaluateGeofenceForAction(userId, cleanLocation);
-  const openShift = getOpenShiftForUser(userId);
+  const geofenceEvaluation = await evaluateGeofenceForAction(userId, cleanLocation);
+  const openShift = await getOpenShiftForUser(userId);
   const activeBreak = getActiveBreak(openShift);
 
   if (normalizedAction === "clock_in") {
@@ -247,35 +248,36 @@ export function performAction(userId, actionType, notes, location) {
       );
     }
 
-    saveClockIn(userId, cleanNotes, cleanLocation, geofenceEvaluation);
+    await saveClockIn(userId, cleanNotes, cleanLocation, geofenceEvaluation);
   } else if (normalizedAction === "break_start") {
     if (!openShift) throw new HttpError(409, "Cannot start break: not clocked in");
     if (activeBreak) throw new HttpError(409, "Cannot start break: break already active");
-    saveStartBreak(userId, cleanNotes, cleanLocation, geofenceEvaluation);
+    await saveStartBreak(userId, cleanNotes, cleanLocation, geofenceEvaluation);
   } else if (normalizedAction === "break_end") {
     if (!openShift) throw new HttpError(409, "Cannot end break: not clocked in");
     if (!activeBreak) throw new HttpError(409, "Cannot end break: no active break");
-    saveEndBreak(userId, cleanNotes, cleanLocation, geofenceEvaluation);
+    await saveEndBreak(userId, cleanNotes, cleanLocation, geofenceEvaluation);
   } else if (normalizedAction === "clock_out") {
     if (!openShift) throw new HttpError(409, "Cannot clock out: not clocked in");
     if (activeBreak) throw new HttpError(409, "Cannot clock out during break");
-    saveClockOut(userId, cleanNotes, cleanLocation, geofenceEvaluation);
+    await saveClockOut(userId, cleanNotes, cleanLocation, geofenceEvaluation);
   } else {
     throw new HttpError(400, "Invalid actionType");
   }
 
   return {
-    ...getCurrentStatus(userId),
+    ...(await getCurrentStatus(userId)),
     geofenceEvaluation,
   };
 }
 
-export function getAttendanceActionHistory(userId) {
-  const logs = getTimeLogsForUser(userId)
+export async function getAttendanceActionHistory(userId) {
+  const logs = await getTimeLogsForUser(userId);
+  const sorted = logs
     .slice()
     .sort((a, b) => Date.parse(b.timestamp || "") - Date.parse(a.timestamp || ""));
 
-  return logs.map((log) => ({
+  return sorted.map((log) => ({
     id: log.id,
     shiftId: log.shiftId,
     actionType: log.actionType,
@@ -296,12 +298,13 @@ export function getAttendanceActionHistory(userId) {
   }));
 }
 
-export function getAttendanceHistory(userId) {
-  const shifts = getAllShiftsForUser(userId)
+export async function getAttendanceHistory(userId) {
+  const shifts = await getAllShiftsForUser(userId);
+  const sorted = shifts
     .slice()
     .sort((a, b) => Date.parse(b.clockInAt || "") - Date.parse(a.clockInAt || ""));
 
-  return shifts.map((shift) => {
+  return sorted.map((shift) => {
     const breakStart = shift.breaks?.map((item) => item.startAt).filter(Boolean) || [];
     const breakEnd = shift.breaks?.map((item) => item.endAt).filter(Boolean) || [];
     const totalMinutes = calculateWorkedMinutes(shift);

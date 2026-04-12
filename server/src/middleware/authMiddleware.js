@@ -2,10 +2,10 @@ import { requireUserFromToken } from "../services/authService.js";
 import { toHttpError } from "../utils/errors.js";
 import { parseBearerToken } from "../utils/auth.js";
 
-export function authMiddleware(req, res, next) {
+export async function authMiddleware(req, res, next) {
   try {
     const token = parseBearerToken(req);
-    req.user = requireUserFromToken(token);
+    req.user = await requireUserFromToken(token);
     next();
   } catch (error) {
     const err = toHttpError(error);

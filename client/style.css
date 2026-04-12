@@ -318,3 +318,127 @@ th {
   color: var(--muted);
   text-align: center;
 }
+
+/* ──── Admin Timesheets ──── */
+
+.topbar-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.filter-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px 12px;
+  margin: 12px 0;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.filter-panel label {
+  margin: 0;
+}
+
+.filter-panel input,
+.filter-panel select {
+  margin-top: 4px;
+}
+
+.filter-panel select {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+}
+
+.filter-panel select:focus {
+  border-color: rgba(79, 124, 255, 0.7);
+}
+
+.filter-actions {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.pagination-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.detail-panel {
+  margin-top: 16px;
+  border-top: 2px solid var(--accent);
+  padding-top: 14px;
+}
+
+.detail-content {
+  margin-top: 10px;
+  font-size: 0.88rem;
+}
+
+.detail-content .detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px 16px;
+  margin-bottom: 12px;
+}
+
+.detail-grid .detail-item {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.detail-item .label {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 2px;
+}
+
+.detail-item .value {
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.detail-actions-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 600px;
+  margin-top: 8px;
+}
+
+.detail-actions-table th,
+.detail-actions-table td {
+  padding: 7px 8px;
+  font-size: 0.82rem;
+}
+
+.status-badge-open { color: #fbbf24; }
+.status-badge-completed { color: #34d399; }
+.status-badge-missing { color: var(--danger); }
+.status-badge-warn { color: #fb923c; }
+
+#timesheetsBody tr.ts-row {
+  cursor: pointer;
+}
+
+#timesheetsBody tr.ts-row:hover {
+  background: rgba(79, 124, 255, 0.08);
+}
+

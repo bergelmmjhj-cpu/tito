@@ -17,9 +17,9 @@ function sanitizeWorker(worker) {
   };
 }
 
-function toWorkerWithWorkplace(worker) {
+async function toWorkerWithWorkplace(worker) {
   const workplaceId = worker.profile?.assignedWorkplaceId || null;
-  const workplace = workplaceId ? findWorkplaceById(workplaceId) : null;
+  const workplace = workplaceId ? await findWorkplaceById(workplaceId) : null;
 
   return {
     ...sanitizeWorker(worker),
@@ -36,15 +36,15 @@ function toWorkerWithWorkplace(worker) {
   };
 }
 
-export function listWorkersWithAssignments() {
-  return listUsers()
-    .filter((user) => user.role !== "admin")
-    .map(toWorkerWithWorkplace)
-    .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+export async function listWorkersWithAssignments() {
+  const users = await listUsers();
+  const filtered = users.filter((user) => user.role !== "admin");
+  const withWorkplaces = await Promise.all(filtered.map(toWorkerWithWorkplace));
+  return withWorkplaces.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
 }
 
-export function assignWorkerToWorkplace(workerUserId, workplaceId) {
-  const worker = findUserById(workerUserId);
+export async function assignWorkerToWorkplace(workerUserId, workplaceId) {
+  const worker = await findUserById(workerUserId);
   if (!worker || worker.role === "admin") {
     throw new HttpError(404, "Worker not found");
   }
@@ -55,7 +55,7 @@ export function assignWorkerToWorkplace(workerUserId, workplaceId) {
       throw new HttpError(400, "workplaceId must be a string or null");
     }
 
-    const workplace = findWorkplaceById(workplaceId.trim());
+    const workplace = await findWorkplaceById(workplaceId.trim());
     if (!workplace) throw new HttpError(404, "Workplace not found");
     if (workplace.active === false) {
       throw new HttpError(400, "Cannot assign inactive workplace");
@@ -64,7 +64,7 @@ export function assignWorkerToWorkplace(workerUserId, workplaceId) {
     assignedWorkplaceId = workplace.id;
   }
 
-  const updated = updateUserById(worker.id, {
+  const updated = await updateUserById(worker.id, {
     profile: {
       ...(worker.profile && typeof worker.profile === "object" ? worker.profile : {}),
       assignedWorkplaceId,
@@ -76,8 +76,9 @@ export function assignWorkerToWorkplace(workerUserId, workplaceId) {
   return toWorkerWithWorkplace(updated);
 }
 
-export function listAssignableWorkplaces() {
-  return listWorkplaces()
+export async function listAssignableWorkplaces() {
+  const workplaces = await listWorkplaces();
+  return workplaces
     .filter((item) => item.active !== false)
     .map((item) => ({
       id: item.id,

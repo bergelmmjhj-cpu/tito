@@ -85,6 +85,7 @@
         <div class="actions nav-actions">
           <button id="showTimeClockBtn" type="button" class="ghost">Time Clock</button>
           <button id="showWorkplacesBtn" type="button" class="ghost hidden">Workplaces</button>
+          <button id="showTimesheetsBtn" type="button" class="ghost hidden">Timesheets</button>
         </div>
       </section>
 
@@ -243,6 +244,74 @@
           </div>
         </section>
       </section>
+
+      <section id="timesheetsSection" class="card hidden">
+        <div class="topbar">
+          <h2>All Worker Timesheets (Admin)</h2>
+          <div class="topbar-actions">
+            <button id="exportTimesheetsCsvBtn" type="button" class="ghost">Export CSV</button>
+            <button id="refreshTimesheetsBtn" type="button" class="ghost">Refresh</button>
+          </div>
+        </div>
+        <div class="filter-panel">
+          <label>Date From<input id="tsDateFrom" type="date" /></label>
+          <label>Date To<input id="tsDateTo" type="date" /></label>
+          <label>Search Worker<input id="tsSearch" type="text" placeholder="Name, email or staff ID" /></label>
+          <label>Workplace
+            <select id="tsWorkplaceFilter">
+              <option value="">All workplaces</option>
+            </select>
+          </label>
+          <label>Status
+            <select id="tsStatusFilter">
+              <option value="">All statuses</option>
+              <option value="open_shift">Open shift</option>
+              <option value="completed">Completed</option>
+              <option value="missing_break_end">Missing break end</option>
+              <option value="no_location">No location</option>
+              <option value="low_accuracy">Low accuracy (&gt;50 m)</option>
+            </select>
+          </label>
+          <div class="filter-actions">
+            <button id="applyTimesheetFiltersBtn" type="button">Apply Filters</button>
+            <button id="clearTimesheetFiltersBtn" type="button" class="ghost">Clear</button>
+          </div>
+        </div>
+        <p id="timesheetError" class="error hidden"></p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Worker</th>
+                <th>Staff ID</th>
+                <th>Date</th>
+                <th>Status</th>
+                <th>Clock In</th>
+                <th>Break Start</th>
+                <th>Break End</th>
+                <th>Clock Out</th>
+                <th>Total Hrs</th>
+                <th>Workplace</th>
+                <th>Location</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody id="timesheetsBody">
+              <tr><td colspan="12" class="muted">No timesheets loaded.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div id="timesheetsPagination" class="pagination-bar"></div>
+
+        <div id="timesheetDetailPanel" class="detail-panel hidden">
+          <div class="topbar">
+            <h3>Shift Detail</h3>
+            <button id="closeTimesheetDetailBtn" type="button" class="ghost">✕ Close</button>
+          </div>
+          <div id="timesheetDetailContent" class="detail-content"></div>
+        </div>
+      </section>
+
     </section>
 
     <footer class="footer">

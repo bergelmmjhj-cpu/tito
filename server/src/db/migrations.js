@@ -3,6 +3,49 @@ import { createPasswordHash } from "../utils/password.js";
 
 export const CURRENT_SCHEMA_VERSION = 3;
 
+const DEFAULT_BOOTSTRAP_ADMIN = {
+  firstName: "System",
+  lastName: "Admin",
+  email: "admin@hotel.local",
+  password: "admin12345",
+  staffId: "A1000",
+};
+
+function readBootstrapAdminConfigFromEnv() {
+  const firstName =
+    process.env.ADMIN_FIRST_NAME ||
+    process.env.DEFAULT_ADMIN_FIRST_NAME ||
+    DEFAULT_BOOTSTRAP_ADMIN.firstName;
+  const lastName =
+    process.env.ADMIN_LAST_NAME ||
+    process.env.DEFAULT_ADMIN_LAST_NAME ||
+    DEFAULT_BOOTSTRAP_ADMIN.lastName;
+  const email =
+    process.env.ADMIN_EMAIL ||
+    process.env.DEFAULT_ADMIN_EMAIL ||
+    DEFAULT_BOOTSTRAP_ADMIN.email;
+  const password =
+    process.env.ADMIN_PASSWORD ||
+    process.env.DEFAULT_ADMIN_PASSWORD ||
+    DEFAULT_BOOTSTRAP_ADMIN.password;
+  const staffId =
+    process.env.ADMIN_STAFF_ID ||
+    process.env.DEFAULT_ADMIN_STAFF_ID ||
+    DEFAULT_BOOTSTRAP_ADMIN.staffId;
+
+  return {
+    firstName: String(firstName).trim() || DEFAULT_BOOTSTRAP_ADMIN.firstName,
+    lastName: String(lastName).trim() || DEFAULT_BOOTSTRAP_ADMIN.lastName,
+    email: String(email).trim().toLowerCase() || DEFAULT_BOOTSTRAP_ADMIN.email,
+    password: String(password),
+    staffId: String(staffId).trim() || DEFAULT_BOOTSTRAP_ADMIN.staffId,
+  };
+}
+
+export function getBootstrapAdminSeed() {
+  return readBootstrapAdminConfigFromEnv();
+}
+
 function buildUser({
   firstName,
   lastName,
@@ -37,17 +80,16 @@ function buildUser({
 }
 
 function createSeedUsers() {
-  const adminEmail = process.env.DEFAULT_ADMIN_EMAIL || "admin@hotel.local";
-  const adminPassword = process.env.DEFAULT_ADMIN_PASSWORD || "admin12345";
+  const adminSeed = getBootstrapAdminSeed();
 
   return [
     buildUser({
-      firstName: "System",
-      lastName: "Admin",
-      email: adminEmail,
-      staffId: "A1000",
+      firstName: adminSeed.firstName,
+      lastName: adminSeed.lastName,
+      email: adminSeed.email,
+      staffId: adminSeed.staffId,
       role: "admin",
-      password: adminPassword,
+      password: adminSeed.password,
     }),
     buildUser({
       firstName: "Maria",
@@ -131,14 +173,15 @@ export function migrateDatabase(db) {
 
   const hasAdmin = safe.users.some((user) => user.role === "admin");
   if (!hasAdmin) {
+    const adminSeed = getBootstrapAdminSeed();
     safe.users.unshift(
       buildUser({
-        firstName: "System",
-        lastName: "Admin",
-        email: process.env.DEFAULT_ADMIN_EMAIL || "admin@hotel.local",
-        staffId: "A1000",
+        firstName: adminSeed.firstName,
+        lastName: adminSeed.lastName,
+        email: adminSeed.email,
+        staffId: adminSeed.staffId,
         role: "admin",
-        password: process.env.DEFAULT_ADMIN_PASSWORD || "admin12345",
+        password: adminSeed.password,
       })
     );
   }
