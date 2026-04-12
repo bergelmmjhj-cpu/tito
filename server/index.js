@@ -38,6 +38,8 @@ async function startServer() {
       const result = await ensureBootstrapAdminExists("startup_bootstrap");
       if (result.created) {
         console.log(`[startup] bootstrap_admin=created email=${result.admin.email}`);
+      } else if (result.reason === "password_synced") {
+        console.log(`[startup] bootstrap_admin=password_synced email=${result.admin.email}`);
       } else {
         console.log(`[startup] bootstrap_admin=skipped reason=${result.reason}`);
       }

@@ -43,9 +43,23 @@ export async function ensureBootstrapAdminExists(source = "startup") {
   ensureValidBootstrapConfig(config);
 
   const users = await listUsers();
-  const hasAdmin = users.some((user) => user.role === "admin");
-  
-  if (hasAdmin) {
+  const existingAdmin = users.find((user) => user.role === "admin");
+
+  if (existingAdmin) {
+    // If the env-configured email matches the existing admin, sync the password
+    // so that changing ADMIN_PASSWORD in the environment takes effect on redeploy.
+    if (
+      existingAdmin.email &&
+      existingAdmin.email.toLowerCase() === config.email.toLowerCase()
+    ) {
+      const { salt, hash } = createPasswordHash(config.password);
+      await updateUserById(existingAdmin.id, {
+        passwordSalt: salt,
+        passwordHash: hash,
+        updatedAt: new Date().toISOString(),
+      });
+      return { created: false, reason: "password_synced", admin: sanitizeUser(existingAdmin) };
+    }
     return { created: false, reason: "admin_exists", admin: null };
   }
 
