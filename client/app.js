@@ -9,6 +9,7 @@ const identifierEl = document.getElementById("identifier");
 const passwordEl = document.getElementById("password");
 const loginBtnEl = document.getElementById("loginBtn");
 const adminLoginBtnEl = document.getElementById("adminLoginBtn");
+const googleLoginBtnEl = document.getElementById("googleLoginBtn");
 const loginErrorEl = document.getElementById("loginError");
 
 const signupFirstNameEl = document.getElementById("signupFirstName");
@@ -19,7 +20,6 @@ const signupPasswordEl = document.getElementById("signupPassword");
 const signupConfirmPasswordEl = document.getElementById("signupConfirmPassword");
 const signupBtnEl = document.getElementById("signupBtn");
 const signupErrorEl = document.getElementById("signupError");
-const googleLoginBtnEl = document.getElementById("googleLoginBtn");
 
 const workerNameEl = document.getElementById("workerName");
 const liveClockEl = document.getElementById("liveClock");
@@ -125,6 +125,19 @@ function setError(el, message) {
 
 function setInfo(el, message) {
   el.textContent = message || "";
+}
+
+function consumeAuthErrorFromUrl() {
+  const url = new URL(window.location.href);
+  const authError = url.searchParams.get("authError");
+  if (!authError) return;
+
+  setAuthMode("login");
+  setError(loginErrorEl, authError);
+  url.searchParams.delete("authError");
+
+  const next = `${url.pathname}${url.search}${url.hash}` || "/";
+  window.history.replaceState({}, document.title, next);
 }
 
 function formatDateTime(value) {
@@ -855,6 +868,11 @@ async function loginAsAdmin() {
   await loadAdminUsers();
 }
 
+function startGoogleLogin() {
+  setError(loginErrorEl, "");
+  window.location.assign(`${API_BASE_URL}/api/auth/google`);
+}
+
 async function requireAdminAccessForScreen(errorEl) {
   const access = await apiFetch("/api/admin/access");
   if (!access?.authenticated) {
@@ -897,55 +915,6 @@ async function signup() {
   renderLocationState("unavailable");
   await Promise.all([loadStatus(), loadHistory()]);
   await refreshLocationSilently();
-}
-
-async function googleLogin() {
-  setError(loginErrorEl, "");
-  try {
-    const data = await apiFetch("/api/auth/google/url");
-    if (!data?.url) throw new Error("Failed to get Google authorization URL");
-    window.location.href = data.url;
-  } catch (error) {
-    setError(loginErrorEl, error.message);
-  }
-}
-
-async function handleGoogleOAuthCallback() {
-  const params = new URLSearchParams(window.location.search);
-  const idToken = params.get("id_token");
-  const code = params.get("code");
-
-  // Only handle if we have an id_token directly (some flows pass it in the URL)
-  if (!idToken && !code) return;
-
-  // Clean the URL so the params don't persist on refresh
-  const cleanUrl = window.location.pathname;
-  window.history.replaceState({}, document.title, cleanUrl);
-
-  if (!idToken) {
-    // Authorization code flow — the backend handles code exchange server-side.
-    // In this implementation the frontend sends the id_token after Google redirects back.
-    // If only a code is present, show an informational error.
-    setError(loginErrorEl, "Google sign-in requires an ID token. Please try again.");
-    return;
-  }
-
-  setError(loginErrorEl, "");
-  try {
-    const data = await apiFetch("/api/auth/google/callback", {
-      method: "POST",
-      body: JSON.stringify({ idToken }),
-    });
-
-    authToken = data.token;
-    localStorage.setItem(TOKEN_KEY, authToken);
-    setLoggedInState();
-    renderLocationState("unavailable");
-    await Promise.all([loadStatus(), loadHistory()]);
-    await refreshLocationSilently();
-  } catch (error) {
-    setError(loginErrorEl, error.message);
-  }
 }
 
 async function handleWorkplaceFormSubmit(event) {
@@ -1015,11 +984,9 @@ loginBtnEl.addEventListener("click", () => {
 adminLoginBtnEl.addEventListener("click", () => {
   loginAsAdmin().catch((error) => setError(loginErrorEl, error.message));
 });
+googleLoginBtnEl.addEventListener("click", startGoogleLogin);
 signupBtnEl.addEventListener("click", () => {
   signup().catch((error) => setError(signupErrorEl, error.message));
-});
-googleLoginBtnEl.addEventListener("click", () => {
-  googleLogin().catch((error) => setError(loginErrorEl, error.message));
 });
 
 logoutBtnEl.addEventListener("click", () => setLoggedOutState());
@@ -1420,7 +1387,7 @@ closeTimesheetDetailBtnEl.addEventListener("click", () => {
 startLiveClock();
 resetWorkplaceForm();
 showMapPlaceholder("Location not captured yet.", "Waiting for location");
-handleGoogleOAuthCallback().catch((error) => setError(loginErrorEl, error.message));
+consumeAuthErrorFromUrl();
 initFromSession();
 
 window.addEventListener("beforeunload", () => {

@@ -6,12 +6,17 @@ import {
   findUserByStaffId,
   findUserById,
   listUsers,
+  updateUserById,
 } from "../models/userModel.js";
 import { createPasswordHash, verifyPassword } from "../utils/password.js";
 import { HttpError } from "../utils/errors.js";
 import { createSession, getSessionUserId } from "./sessionService.js";
 
 const PASSWORD_MIN_LENGTH = 8;
+const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
+const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
+const GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo";
+const GOOGLE_SCOPE = "openid email profile";
 
 function sanitizeUser(user) {
   return {
@@ -59,6 +64,11 @@ function normalizePhone(phone) {
   return clean;
 }
 
+function normalizeOptionalName(value, fallback) {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  return fallback;
+}
+
 function validatePassword(password, confirmPassword) {
   if (typeof password !== "string" || password.length < PASSWORD_MIN_LENGTH) {
     throw new HttpError(400, `Password must be at least ${PASSWORD_MIN_LENGTH} characters`);
@@ -88,6 +98,126 @@ async function generateStaffId() {
   return `W${candidate}`;
 }
 
+function getGoogleOAuthConfig(origin) {
+  const clientId = String(process.env.GOOGLE_CLIENT_ID || "").trim();
+  const clientSecret = String(process.env.GOOGLE_CLIENT_SECRET || "").trim();
+  const redirectUri = String(process.env.GOOGLE_REDIRECT_URI || "").trim() ||
+    (origin ? `${origin}/api/auth/google/callback` : "");
+
+  if (!clientId || !clientSecret || !redirectUri) {
+    throw new HttpError(500, "Google OAuth is not configured on the server");
+  }
+
+  return { clientId, clientSecret, redirectUri };
+}
+
+async function exchangeGoogleCodeForTokens(code, origin) {
+  const { clientId, clientSecret, redirectUri } = getGoogleOAuthConfig(origin);
+  const body = new URLSearchParams({
+    code,
+    client_id: clientId,
+    client_secret: clientSecret,
+    redirect_uri: redirectUri,
+    grant_type: "authorization_code",
+  });
+
+  const response = await fetch(GOOGLE_TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload?.access_token) {
+    const message = payload?.error_description || payload?.error || "Google token exchange failed";
+    throw new HttpError(401, message);
+  }
+
+  return payload;
+}
+
+async function fetchGoogleUserProfile(accessToken) {
+  const response = await fetch(GOOGLE_USERINFO_URL, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload?.email) {
+    throw new HttpError(401, "Failed to read Google account profile");
+  }
+
+  if (payload.email_verified === false) {
+    throw new HttpError(403, "Google account email is not verified");
+  }
+
+  return payload;
+}
+
+async function findOrCreateGoogleUser(googleProfile) {
+  const email = normalizeEmail(googleProfile.email);
+  const firstName = normalizeOptionalName(
+    googleProfile.given_name,
+    normalizeOptionalName(googleProfile.name?.split(" ")?.[0], "Google")
+  );
+  const lastName = normalizeOptionalName(
+    googleProfile.family_name,
+    normalizeOptionalName(googleProfile.name?.split(" ")?.slice(1).join(" "), "User")
+  );
+  const now = new Date().toISOString();
+  const providerProfile = {
+    authProvider: "google",
+    googleSubject: typeof googleProfile.sub === "string" ? googleProfile.sub : null,
+    googlePicture: typeof googleProfile.picture === "string" ? googleProfile.picture : null,
+    createdFrom: "google_oauth",
+  };
+
+  const existing = await findUserByEmail(email);
+  if (existing) {
+    if (existing.isActive === false) {
+      throw new HttpError(403, "User account is inactive");
+    }
+
+    const nextProfile = {
+      ...(existing.profile || {}),
+      ...providerProfile,
+    };
+
+    const profileChanged = JSON.stringify(existing.profile || {}) !== JSON.stringify(nextProfile);
+    const nameChanged = !existing.firstName || !existing.lastName;
+
+    if (profileChanged || nameChanged) {
+      return (await updateUserById(existing.id, {
+        firstName: existing.firstName || firstName,
+        lastName: existing.lastName || lastName,
+        name: existing.name || `${firstName} ${lastName}`,
+        profile: nextProfile,
+      })) || existing;
+    }
+
+    return existing;
+  }
+
+  const generatedPassword = `${crypto.randomUUID()}${crypto.randomUUID()}`;
+  const { salt, hash } = createPasswordHash(generatedPassword);
+
+  return createUser({
+    id: crypto.randomUUID(),
+    firstName,
+    lastName,
+    name: `${firstName} ${lastName}`,
+    email,
+    phone: null,
+    staffId: await generateStaffId(),
+    role: "worker",
+    isActive: true,
+    profile: providerProfile,
+    passwordSalt: salt,
+    passwordHash: hash,
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
 async function authenticateWithCredentials(identifier, password) {
   if (typeof identifier !== "string" || !identifier.trim()) {
     throw new HttpError(400, "Staff ID or email is required");
@@ -110,6 +240,35 @@ export async function login(identifier, password) {
   const user = await authenticateWithCredentials(identifier, password);
 
   const token = await createSession(user.id);
+  return { token, user: sanitizeUser(user) };
+}
+
+export function buildGoogleAuthorizationUrl(origin, state) {
+  const { clientId, redirectUri } = getGoogleOAuthConfig(origin);
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: "code",
+    scope: GOOGLE_SCOPE,
+    access_type: "offline",
+    prompt: "consent",
+  });
+
+  if (state) params.set("state", state);
+
+  return `${GOOGLE_AUTH_URL}?${params.toString()}`;
+}
+
+export async function loginWithGoogleAuthorizationCode(code, origin) {
+  if (typeof code !== "string" || !code.trim()) {
+    throw new HttpError(400, "Google authorization code is required");
+  }
+
+  const tokens = await exchangeGoogleCodeForTokens(code.trim(), origin);
+  const googleProfile = await fetchGoogleUserProfile(tokens.access_token);
+  const user = await findOrCreateGoogleUser(googleProfile);
+  const token = await createSession(user.id);
+
   return { token, user: sanitizeUser(user) };
 }
 

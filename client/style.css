@@ -107,6 +107,27 @@ select:focus {
   flex-wrap: wrap;
 }
 
+.oauth-block {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.oauth-label {
+  margin: 0 0 10px;
+}
+
+.google-login-btn {
+  width: 100%;
+  background: #ffffff;
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #152033;
+}
+
+.google-login-btn:hover {
+  background: #eef3ff;
+}
+
 .auth-switch {
   display: flex;
   gap: 8px;

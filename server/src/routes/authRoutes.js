@@ -1,6 +1,15 @@
 import { Router } from "express";
-import { loginController, meController, registerController } from "../controllers/authController.js";
-import { googleAuthUrlController, googleCallbackController } from "../controllers/googleAuthController.js";
+import {
+  googleAuthStartController,
+  googleCallbackController as googleRedirectCallbackController,
+  loginController,
+  meController,
+  registerController,
+} from "../controllers/authController.js";
+import {
+  googleAuthUrlController,
+  googleCallbackController as googleTokenCallbackController,
+} from "../controllers/googleAuthController.js";
 import { authReadRateLimit, loginRateLimit } from "../middleware/rateLimitMiddleware.js";
 
 export function createAuthRouter() {
@@ -10,8 +19,10 @@ export function createAuthRouter() {
   router.post("/login", loginRateLimit, loginController);
   router.get("/me", authReadRateLimit, meController);
 
+  router.get("/google", authReadRateLimit, googleAuthStartController);
+  router.get("/google/callback", authReadRateLimit, googleRedirectCallbackController);
   router.get("/google/url", googleAuthUrlController);
-  router.post("/google/callback", loginRateLimit, googleCallbackController);
+  router.post("/google/callback", loginRateLimit, googleTokenCallbackController);
 
   return router;
 }

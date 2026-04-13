@@ -74,6 +74,9 @@ ADMIN_PASSWORD=<set-strong-password>
 ADMIN_FIRST_NAME=System
 ADMIN_LAST_NAME=Admin
 ADMIN_STAFF_ID=A1000
+GOOGLE_CLIENT_ID=<optional-google-client-id>
+GOOGLE_CLIENT_SECRET=<optional-google-client-secret>
+GOOGLE_REDIRECT_URI=<optional-google-callback-uri>
 ```
 
 Backward-compatible aliases are still supported:
@@ -104,6 +107,21 @@ This command creates an admin only if no admin exists.
 ### Admin login process
 
 After bootstrap/seed, log in from the normal login page using admin staff ID or email and password. The UI enables admin-only pages (Workplaces and Timesheets) based on the user role returned by auth.
+
+### Google login (optional)
+
+If you configure a Google OAuth web client, the app can start Google sign-in from the login screen.
+
+- Set `GOOGLE_CLIENT_ID`
+- Set `GOOGLE_CLIENT_SECRET`
+- Set `GOOGLE_REDIRECT_URI`
+- For local development, use `http://localhost:3000/api/auth/google/callback`
+- For Railway production, use your deployed domain, for example `https://tito-production-e1d5.up.railway.app/api/auth/google/callback`
+
+The matching Google OAuth `Authorized JavaScript origins` should be the site origin only, for example:
+
+- `http://localhost:3000`
+- `https://tito-production-e1d5.up.railway.app`
 
 ### Promote an existing worker to admin (optional)
 
