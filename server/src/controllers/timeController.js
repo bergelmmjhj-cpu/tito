@@ -1,5 +1,6 @@
 import {
   getAttendanceActionHistory,
+  getAttendanceHistory,
   getCurrentStatus,
   performAction,
 } from "../services/timeService.js";
@@ -33,6 +34,16 @@ export async function historyController(req, res) {
   try {
     const history = await getAttendanceActionHistory(req.user.id);
     res.json({ user: req.user, history });
+  } catch (error) {
+    const err = toHttpError(error);
+    res.status(err.status).json({ error: err.message });
+  }
+}
+
+export async function shiftHistoryController(req, res) {
+  try {
+    const shifts = await getAttendanceHistory(req.user.id);
+    res.json({ user: req.user, shifts });
   } catch (error) {
     const err = toHttpError(error);
     res.status(err.status).json({ error: err.message });

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildShiftHourSummary } from "../services/payableHoursService.js";
 import { initializePool } from "./pool.js";
 import { initializeSchema, getSchemaVersion, setSchemaVersion } from "./schema.js";
 import { query, withClient } from "./pool.js";
@@ -89,6 +90,8 @@ async function applySchemaAlterations() {
     `CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id)`,
     `ALTER TABLE users ALTER COLUMN password_salt DROP NOT NULL`,
     `ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL`,
+    `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS actual_hours NUMERIC(10, 2)`,
+    `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS payable_hours NUMERIC(10, 2)`,
   ];
 
   for (const sql of alterations) {
@@ -193,15 +196,19 @@ async function migrateFromJsonIfExists() {
         // Migrate shifts with breaks
         if (Array.isArray(data.shifts) && data.shifts.length > 0) {
           for (const shift of data.shifts) {
+            const summary = buildShiftHourSummary(shift);
             await client.query(
-              `INSERT INTO shifts (id, user_id, clock_in_at, clock_out_at, created_at, updated_at)
-              VALUES ($1, $2, $3, $4, $5, $6)
+              `INSERT INTO shifts (
+                id, user_id, clock_in_at, clock_out_at, actual_hours, payable_hours, created_at, updated_at
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
               ON CONFLICT (id) DO NOTHING`,
               [
                 shift.id,
                 shift.userId,
                 shift.clockInAt,
                 shift.clockOutAt || null,
+                shift.actualHours ?? summary.actualHours,
+                shift.payableHours ?? summary.payableHours,
                 shift.createdAt || new Date().toISOString(),
                 shift.updatedAt || new Date().toISOString(),
               ]
@@ -333,7 +340,7 @@ export async function writeDatabaseToJson(db) {
 
 function createInitialDatabase() {
   return {
-    schemaVersion: 1,
+    schemaVersion: 4,
     users: [],
     workplaces: [],
     shifts: [],

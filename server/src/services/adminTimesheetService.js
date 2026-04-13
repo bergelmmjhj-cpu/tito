@@ -1,6 +1,7 @@
 import { readDatabase } from "../db/database.js";
 import { listUsers } from "../models/userModel.js";
 import { listWorkplaces, findWorkplaceById } from "../models/workplaceModel.js";
+import { buildShiftHourSummary } from "./payableHoursService.js";
 import { HttpError } from "../utils/errors.js";
 
 const LOW_ACCURACY_THRESHOLD_METERS = 50;
@@ -10,20 +11,6 @@ const MAX_PAGE_LIMIT = 200;
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function calculateBreakMinutes(shift) {
-  if (!Array.isArray(shift.breaks)) return 0;
-  return shift.breaks.reduce((sum, b) => {
-    if (!b.startAt || !b.endAt) return sum;
-    return sum + (Date.parse(b.endAt) - Date.parse(b.startAt)) / 60_000;
-  }, 0);
-}
-
-function calculateWorkedMinutes(shift) {
-  if (!shift.clockInAt || !shift.clockOutAt) return null;
-  const total = (Date.parse(shift.clockOutAt) - Date.parse(shift.clockInAt)) / 60_000;
-  return Math.max(0, total - calculateBreakMinutes(shift));
-}
 
 function deriveShiftStatus(shift) {
   const openBreak = Array.isArray(shift.breaks) && shift.breaks.find((b) => b.startAt && !b.endAt);
@@ -92,7 +79,7 @@ function buildTimesheetRow(shift, user, shiftLogs, workplaceIndex) {
     geofence?.workplaceName ||
     (workplaceId ? workplaceIndex[workplaceId]?.name || null : null);
 
-  const workedMinutes = calculateWorkedMinutes(shift);
+  const summary = buildShiftHourSummary(shift);
   const status = deriveShiftStatus(shift);
 
   return {
@@ -107,8 +94,12 @@ function buildTimesheetRow(shift, user, shiftLogs, workplaceIndex) {
     clockOutAt: shift.clockOutAt || null,
     breakStartAt: (shift.breaks || []).map((b) => b.startAt || null).filter(Boolean),
     breakEndAt: (shift.breaks || []).map((b) => b.endAt || null).filter(Boolean),
-    totalHours: workedMinutes != null ? Number((workedMinutes / 60).toFixed(2)) : null,
-    totalMinutes: workedMinutes,
+    rawDuration: summary.rawDuration,
+    actualHours: summary.actualHours,
+    payableHours: summary.payableHours,
+    totalHours: summary.actualHours,
+    totalMinutes: summary.workedMinutes,
+    breakMinutes: summary.breakMinutes,
     workplaceId: workplaceId || null,
     workplaceName: workplaceName || null,
     distanceMeters: typeof geofence?.distanceMeters === "number" ? geofence.distanceMeters : null,
@@ -309,7 +300,9 @@ const CSV_COLUMNS = [
   { header: "Clock Out", key: "clockOutAt" },
   { header: "Break Start(s)", key: "breakStartAt" },
   { header: "Break End(s)", key: "breakEndAt" },
-  { header: "Total Hours", key: "totalHours" },
+  { header: "Raw Duration", key: "rawDuration" },
+  { header: "Actual Hours", key: "actualHours" },
+  { header: "Payable Hours", key: "payableHours" },
   { header: "Workplace", key: "workplaceName" },
   { header: "Distance (m)", key: "distanceMeters" },
   { header: "Within Geofence", key: "withinGeofence" },

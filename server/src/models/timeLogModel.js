@@ -1,7 +1,13 @@
 import crypto from "node:crypto";
 import { query, withClient } from "../db/pool.js";
+import { buildShiftHourSummary } from "../services/payableHoursService.js";
 import { nowIso } from "../utils/time.js";
 import { isDatabaseReady, readDatabaseFromJson, writeDatabaseToJson } from "../db/initialization.js";
+
+function toNumberOrNull(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 function normalizeLocation(location) {
   if (!location || typeof location !== "object") return null;
@@ -35,16 +41,25 @@ function normalizeGeofence(geofence) {
 }
 
 function normalizeDbShift(dbShift, breaks = []) {
+  const normalizedBreaks = breaks.map((b) => ({
+    id: b.id,
+    startAt: b.start_at,
+    endAt: b.end_at,
+  }));
+  const summary = buildShiftHourSummary({
+    clockInAt: dbShift.clock_in_at,
+    clockOutAt: dbShift.clock_out_at,
+    breaks: normalizedBreaks,
+  });
+
   return {
     id: dbShift.id,
     userId: dbShift.user_id,
     clockInAt: dbShift.clock_in_at,
     clockOutAt: dbShift.clock_out_at,
-    breaks: breaks.map((b) => ({
-      id: b.id,
-      startAt: b.start_at,
-      endAt: b.end_at,
-    })),
+    actualHours: toNumberOrNull(dbShift.actual_hours) ?? summary.actualHours,
+    payableHours: toNumberOrNull(dbShift.payable_hours) ?? summary.payableHours,
+    breaks: normalizedBreaks,
     createdAt: dbShift.created_at,
     updatedAt: dbShift.updated_at,
   };
@@ -128,6 +143,8 @@ export async function saveClockIn(userId, notes = null, location = null, geofenc
       userId,
       clockInAt: timestamp,
       clockOutAt: null,
+      actualHours: null,
+      payableHours: null,
       breaks: [],
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -375,6 +392,9 @@ export async function saveClockOut(userId, notes = null, location = null, geofen
 
     shift.clockOutAt = timestamp;
     shift.updatedAt = timestamp;
+    const summary = buildShiftHourSummary(shift);
+    shift.actualHours = summary.actualHours;
+    shift.payableHours = summary.payableHours;
 
     db.timeLogs.push({
       id: crypto.randomUUID(),
@@ -426,13 +446,26 @@ export async function saveClockOut(userId, notes = null, location = null, geofen
         ]
       );
 
-      await client.query("COMMIT");
-
       const shiftData = await client.query(`SELECT * FROM shifts WHERE id = $1`, [shiftId]);
       const breaksData = await client.query(`SELECT * FROM breaks WHERE shift_id = $1 ORDER BY start_at`, [
         shiftId,
       ]);
-      return normalizeDbShift(shiftData.rows[0], breaksData.rows);
+      const normalizedShift = normalizeDbShift(shiftData.rows[0], breaksData.rows);
+      const summary = buildShiftHourSummary(normalizedShift);
+
+      await client.query(
+        `UPDATE shifts SET actual_hours = $1, payable_hours = $2, updated_at = $3 WHERE id = $4`,
+        [summary.actualHours, summary.payableHours, timestamp, shiftId]
+      );
+
+      await client.query("COMMIT");
+
+      return {
+        ...normalizedShift,
+        actualHours: summary.actualHours,
+        payableHours: summary.payableHours,
+        updatedAt: timestamp,
+      };
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;

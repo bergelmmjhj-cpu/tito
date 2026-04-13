@@ -75,6 +75,8 @@ const CREATE_TABLES_SQL = `
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     clock_in_at TIMESTAMP NOT NULL,
     clock_out_at TIMESTAMP,
+    actual_hours NUMERIC(10, 2),
+    payable_hours NUMERIC(10, 2),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
   );

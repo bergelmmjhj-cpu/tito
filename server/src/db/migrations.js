@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
 import { createPasswordHash } from "../utils/password.js";
+import { buildShiftHourSummary } from "../services/payableHoursService.js";
 
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 const DEFAULT_BOOTSTRAP_ADMIN = {
   firstName: "System",
@@ -219,9 +220,24 @@ export function migrateDatabase(db) {
   }));
 
   safe.shifts = safe.shifts.map((shift) => ({
-    ...shift,
-    breaks: Array.isArray(shift.breaks) ? shift.breaks : [],
-  }));
+    const normalizedShift = {
+      ...shift,
+      breaks: Array.isArray(shift.breaks) ? shift.breaks : [],
+    };
+    const summary = buildShiftHourSummary(normalizedShift);
+
+    return {
+      ...normalizedShift,
+      actualHours:
+        typeof shift.actualHours === "number" && Number.isFinite(shift.actualHours)
+          ? shift.actualHours
+          : summary.actualHours,
+      payableHours:
+        typeof shift.payableHours === "number" && Number.isFinite(shift.payableHours)
+          ? shift.payableHours
+          : summary.payableHours,
+    };
+  });
 
   safe.timeLogs = safe.timeLogs.map((log) => {
     const location = log?.location && typeof log.location === "object" ? log.location : null;

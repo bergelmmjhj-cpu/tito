@@ -10,6 +10,9 @@ function toLegacyShift(historyItem, workerId) {
     hotelName: "N/A",
     clockInAt: historyItem.timeIn,
     clockOutAt: historyItem.timeOut,
+    rawDuration: historyItem.rawDuration,
+    actualHours: historyItem.actualHours,
+    payableHours: historyItem.payableHours,
     status: historyItem.timeOut ? "closed" : "open",
   };
 }
@@ -17,6 +20,9 @@ function toLegacyShift(historyItem, workerId) {
 function toLegacySummary(userId, status, history) {
   const closed = history.filter((item) => item.timeOut);
   const totalMinutes = closed.reduce((sum, item) => sum + (item.totalMinutes || 0), 0);
+  const payableHours = Number(
+    closed.reduce((sum, item) => sum + (item.payableHours || 0), 0).toFixed(2)
+  );
 
   return {
     workerId: userId,
@@ -25,6 +31,7 @@ function toLegacySummary(userId, status, history) {
     openShift: status.openShift,
     totalMinutes,
     totalHours: Number((totalMinutes / 60).toFixed(2)),
+    payableHours,
   };
 }
 

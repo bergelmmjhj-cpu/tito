@@ -116,16 +116,22 @@
           <input id="notes" type="text" placeholder="Add notes for this action" maxlength="500" />
         </label>
 
-        <section class="location-panel" aria-live="polite">
+        <section id="locationPanel" class="location-panel" aria-live="polite">
           <div class="topbar compact">
             <h3>Location</h3>
-            <button id="refreshLocationBtn" type="button" class="ghost small">Refresh Location</button>
+            <button id="refreshLocationBtn" type="button" class="ghost small">Retry / Refresh Location</button>
           </div>
           <p class="status-line">
             Current location status:
             <span id="locationStatusBadge" class="badge">Location unavailable</span>
           </p>
+          <p id="locationMessage" class="location-message">Open this screen to request a fresh phone location.</p>
           <p id="locationCoordinates" class="muted">Coordinates: —</p>
+          <div id="locationHelpPanel" class="location-guidance hidden">
+            <strong>Location access is required</strong>
+            <p>Turn on Location Services on your phone, allow Safari or Chrome to use location for this site, then reopen the page and tap Retry / Refresh Location.</p>
+          </div>
+          <p id="locationDebug" class="location-debug muted">Permission: checking</p>
           <div class="last-location">
             <p class="muted">Last captured location</p>
             <p id="lastLocationDetails" class="location-details">No location captured yet.</p>
@@ -148,6 +154,7 @@
           <button id="endBreakBtn" type="button">End Break</button>
           <button id="clockOutBtn" type="button">Clock Out</button>
         </div>
+        <p id="locationActionHint" class="location-action-hint muted">Clock In stays disabled until a fresh location is captured.</p>
       </section>
 
       <section id="historySection" class="card">
@@ -160,18 +167,19 @@
             <thead>
               <tr>
                 <th>Date</th>
-                <th>Action</th>
-                <th>Attendance Time</th>
-                <th>Location</th>
-                <th>Workplace / Distance</th>
-                <th>Accuracy</th>
-                <th>Location Captured</th>
-                <th>Notes</th>
+                <th>Status</th>
+                <th>Clock In</th>
+                <th>Break Start</th>
+                <th>Break End</th>
+                <th>Clock Out</th>
+                <th>Raw Duration</th>
+                <th>Actual Hrs</th>
+                <th>Payable Hrs</th>
               </tr>
             </thead>
             <tbody id="historyBody">
               <tr>
-                <td colspan="8" class="muted">No attendance history yet.</td>
+                <td colspan="9" class="muted">No attendance history yet.</td>
               </tr>
             </tbody>
           </table>
@@ -307,14 +315,16 @@
                 <th>Break Start</th>
                 <th>Break End</th>
                 <th>Clock Out</th>
-                <th>Total Hrs</th>
+                <th>Raw Duration</th>
+                <th>Actual Hrs</th>
+                <th>Payable Hrs</th>
                 <th>Workplace</th>
                 <th>Location</th>
                 <th>Notes</th>
               </tr>
             </thead>
             <tbody id="timesheetsBody">
-              <tr><td colspan="12" class="muted">No timesheets loaded.</td></tr>
+              <tr><td colspan="14" class="muted">No timesheets loaded.</td></tr>
             </tbody>
           </table>
         </div>

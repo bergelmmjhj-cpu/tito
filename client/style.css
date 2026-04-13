@@ -229,6 +229,49 @@ button:disabled {
   background: rgba(0, 0, 0, 0.2);
 }
 
+.location-panel[data-state="denied"],
+.location-panel[data-state="blocked"],
+.location-panel[data-state="timeout"] {
+  border-color: rgba(255, 121, 141, 0.55);
+  background: rgba(90, 18, 30, 0.28);
+}
+
+.location-message {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.location-guidance {
+  margin: 10px 0;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 121, 141, 0.45);
+  background: rgba(255, 121, 141, 0.12);
+}
+
+.location-guidance strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.location-guidance p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.location-debug {
+  margin: 8px 0 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.location-action-hint {
+  margin: 10px 0 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
 .last-location {
   margin-top: 8px;
   border-top: 1px solid var(--border);
@@ -519,5 +562,47 @@ th {
   flex: 1;
   height: 1px;
   background: var(--border);
+}
+
+@media (max-width: 640px) {
+  .container {
+    margin: 18px auto;
+    padding: 0 12px 20px;
+  }
+
+  .card {
+    padding: 14px;
+  }
+
+  .topbar,
+  .topbar-actions,
+  .filter-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .actions button,
+  .assignment-controls button,
+  .filter-actions button {
+    width: 100%;
+  }
+
+  .location-panel {
+    padding: 14px;
+  }
+
+  .location-guidance {
+    font-size: 0.92rem;
+  }
+
+  th,
+  td {
+    font-size: 0.85rem;
+    padding: 8px 6px;
+  }
+
+  .detail-content .detail-grid {
+    grid-template-columns: 1fr;
+  }
 }
 

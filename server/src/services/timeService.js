@@ -10,8 +10,8 @@ import {
 import { findUserById } from "../models/userModel.js";
 import { findWorkplaceById } from "../models/workplaceModel.js";
 import { calculateDistanceMeters } from "./geofenceService.js";
+import { buildShiftHourSummary } from "./payableHoursService.js";
 import { HttpError } from "../utils/errors.js";
-import { minutesBetween } from "../utils/time.js";
 
 const NOTES_MAX_LENGTH = 500; // keep notes concise for UI display and log storage
 const LOCATION_REQUIRED = process.env.REQUIRE_ATTENDANCE_LOCATION !== "false";
@@ -37,19 +37,26 @@ async function resolveStatus(userId) {
   return getActiveBreak(openShift) ? "on_break" : "clocked_in";
 }
 
-function calculateBreakMinutes(shift) {
-  if (!Array.isArray(shift.breaks)) return 0;
-  return shift.breaks.reduce((sum, item) => {
-    if (!item.startAt || !item.endAt) return sum;
-    return sum + minutesBetween(item.startAt, item.endAt);
-  }, 0);
+function buildLogsByShift(logs) {
+  const map = new Map();
+
+  for (const log of logs) {
+    if (!map.has(log.shiftId)) map.set(log.shiftId, []);
+    map.get(log.shiftId).push(log);
+  }
+
+  return map;
 }
 
-function calculateWorkedMinutes(shift) {
-  if (!shift.clockInAt || !shift.clockOutAt) return 0;
-  const total = minutesBetween(shift.clockInAt, shift.clockOutAt);
-  const breakMinutes = calculateBreakMinutes(shift);
-  return Math.max(0, total - breakMinutes);
+function firstLogOfType(logs, actionType) {
+  return (logs || []).find((log) => log.actionType === actionType) || null;
+}
+
+function deriveShiftStatus(shift) {
+  const activeBreak = getActiveBreak(shift);
+  if (activeBreak) return "missing_break_end";
+  if (!shift.clockOutAt) return "open_shift";
+  return "completed";
 }
 
 function validateNotes(notes) {
@@ -299,25 +306,36 @@ export async function getAttendanceActionHistory(userId) {
 }
 
 export async function getAttendanceHistory(userId) {
-  const shifts = await getAllShiftsForUser(userId);
+  const [shifts, logs] = await Promise.all([getAllShiftsForUser(userId), getTimeLogsForUser(userId)]);
+  const logsByShift = buildLogsByShift(logs);
   const sorted = shifts
     .slice()
     .sort((a, b) => Date.parse(b.clockInAt || "") - Date.parse(a.clockInAt || ""));
 
   return sorted.map((shift) => {
+    const shiftLogs = logsByShift.get(shift.id) || [];
+    const clockInLog = firstLogOfType(shiftLogs, "clock_in");
+    const clockOutLog = firstLogOfType(shiftLogs, "clock_out");
     const breakStart = shift.breaks?.map((item) => item.startAt).filter(Boolean) || [];
     const breakEnd = shift.breaks?.map((item) => item.endAt).filter(Boolean) || [];
-    const totalMinutes = calculateWorkedMinutes(shift);
+    const summary = buildShiftHourSummary(shift);
 
     return {
       shiftId: shift.id,
       date: shift.clockInAt ? shift.clockInAt.slice(0, 10) : null,
+      status: deriveShiftStatus(shift),
       timeIn: shift.clockInAt || null,
       breakStart,
       breakEnd,
       timeOut: shift.clockOutAt || null,
-      totalHours: Number((totalMinutes / 60).toFixed(2)),
-      totalMinutes,
+      rawDuration: summary.rawDuration,
+      actualHours: summary.actualHours,
+      payableHours: summary.payableHours,
+      totalHours: summary.actualHours,
+      totalMinutes: summary.workedMinutes,
+      breakMinutes: summary.breakMinutes,
+      clockInNotes: clockInLog?.notes || null,
+      clockOutNotes: clockOutLog?.notes || null,
     };
   });
 }

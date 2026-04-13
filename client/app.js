@@ -32,12 +32,17 @@ const clockInBtnEl = document.getElementById("clockInBtn");
 const startBreakBtnEl = document.getElementById("startBreakBtn");
 const endBreakBtnEl = document.getElementById("endBreakBtn");
 const clockOutBtnEl = document.getElementById("clockOutBtn");
+const locationActionHintEl = document.getElementById("locationActionHint");
 const historyBodyEl = document.getElementById("historyBody");
 const refreshHistoryBtnEl = document.getElementById("refreshHistoryBtn");
 const logoutBtnEl = document.getElementById("logoutBtn");
+const locationPanelEl = document.getElementById("locationPanel");
 const refreshLocationBtnEl = document.getElementById("refreshLocationBtn");
 const locationStatusBadgeEl = document.getElementById("locationStatusBadge");
+const locationMessageEl = document.getElementById("locationMessage");
 const locationCoordinatesEl = document.getElementById("locationCoordinates");
+const locationHelpPanelEl = document.getElementById("locationHelpPanel");
+const locationDebugEl = document.getElementById("locationDebug");
 const lastLocationDetailsEl = document.getElementById("lastLocationDetails");
 const locationMapEl = document.getElementById("locationMap");
 const mapPlaceholderEl = document.getElementById("mapPlaceholder");
@@ -92,7 +97,8 @@ const adminUserMessageEl = document.getElementById("adminUserMessage");
 const refreshUsersBtnEl = document.getElementById("refreshUsersBtn");
 
 const TOKEN_KEY = "timeclock_token";
-const GEO_OPTIONS = { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 };
+const GEO_REQUEST_OPTIONS = { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 };
+const MAX_CLOCK_IN_LOCATION_AGE_MS = 2 * 60 * 1000;
 
 let authToken = localStorage.getItem(TOKEN_KEY) || "";
 let currentStatus = "not_clocked_in";
@@ -101,6 +107,10 @@ let lastCapturedLocation = null;
 let currentUser = null;
 let locationMap = null;
 let locationMarker = null;
+let locationPermissionState = "unknown";
+let geolocationPermissionStatus = null;
+let lastLocationIssue = "";
+let lastLocationCheckAt = null;
 
 const API_BASE_URL = (() => {
   const configured = window.TIME_CLOCK_API_BASE_URL;
@@ -125,6 +135,14 @@ function setError(el, message) {
 
 function setInfo(el, message) {
   el.textContent = message || "";
+}
+
+function logLocationDiagnostic(event, details = {}) {
+  console.info("[geo]", event, details);
+}
+
+function formatHours(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(2) : "—";
 }
 
 function consumeAuthErrorFromUrl() {
@@ -167,6 +185,14 @@ function formatCoordinates(latitude, longitude) {
   return `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
 }
 
+function formatDurationMinutes(minutes) {
+  if (typeof minutes !== "number" || !Number.isFinite(minutes)) return "—";
+  const rounded = Math.max(0, Math.round(minutes));
+  const hours = Math.floor(rounded / 60);
+  const remainder = rounded % 60;
+  return `${hours}h ${String(remainder).padStart(2, "0")}m`;
+}
+
 function isValidLocation(location) {
   return Boolean(
     location &&
@@ -175,6 +201,102 @@ function isValidLocation(location) {
       typeof location.longitude === "number" &&
       Number.isFinite(location.longitude)
   );
+}
+
+function getLocationAgeMs(location) {
+  if (!location?.capturedAt) return null;
+  const capturedAt = Date.parse(location.capturedAt);
+  if (Number.isNaN(capturedAt)) return null;
+  return Date.now() - capturedAt;
+}
+
+function isFreshLocation(location) {
+  const ageMs = getLocationAgeMs(location);
+  return isValidLocation(location) && ageMs !== null && ageMs <= MAX_CLOCK_IN_LOCATION_AGE_MS;
+}
+
+function describePermissionState(state) {
+  if (state === "granted") return "granted";
+  if (state === "prompt") return "prompt";
+  if (state === "denied") return "denied";
+  if (state === "unsupported") return "unsupported";
+  return "checking";
+}
+
+function updateLastLocationDetails(location, label = "Last captured location") {
+  if (!isValidLocation(location)) {
+    lastLocationDetailsEl.textContent = "No location captured yet.";
+    return;
+  }
+
+  const ageMs = getLocationAgeMs(location);
+  const freshnessLabel = ageMs !== null && ageMs <= MAX_CLOCK_IN_LOCATION_AGE_MS ? "Fresh" : "Stale";
+  const coordinates = formatCoordinates(location.latitude, location.longitude);
+  lastLocationDetailsEl.textContent = `${label}: ${coordinates} | Accuracy ${
+    typeof location.accuracy === "number" ? `${location.accuracy.toFixed(1)}m` : "n/a"
+  } | Captured ${formatDateTime(location.capturedAt)} | ${freshnessLabel}`;
+}
+
+function getLocationUserMessage(status, location) {
+  if (status === "requesting") {
+    return "Requesting location permission and a fresh phone GPS fix now.";
+  }
+
+  if (status === "granted") {
+    return isFreshLocation(location)
+      ? "Fresh location captured. You can clock in."
+      : "Location permission is granted, but the saved fix is stale. Tap Retry / Refresh Location before clocking in.";
+  }
+
+  if (status === "denied") {
+    return "Location permission was denied on this request. Allow it and try again.";
+  }
+
+  if (status === "blocked") {
+    return "Location is blocked in browser or phone settings for this site.";
+  }
+
+  if (status === "timeout") {
+    return "Location timed out. Move to a clearer signal, then retry.";
+  }
+
+  return "Location is unavailable on this device or browser right now.";
+}
+
+function renderLocationDebug() {
+  const parts = [`Permission: ${describePermissionState(locationPermissionState)}`];
+  if (lastLocationIssue) parts.push(`Last issue: ${lastLocationIssue}`);
+  if (lastLocationCheckAt) parts.push(`Last check: ${formatDateTime(lastLocationCheckAt)}`);
+  locationDebugEl.textContent = parts.join(" | ");
+}
+
+function renderLocationActionHint() {
+  if (!LOCATION_REQUIRED) {
+    locationActionHintEl.textContent = "Location is optional in this browser configuration.";
+    return;
+  }
+
+  if (currentStatus !== "not_clocked_in" && currentStatus !== "clocked_out") {
+    locationActionHintEl.textContent = "A fresh location is enforced before Clock In to protect attendance integrity.";
+    return;
+  }
+
+  if (locationPermissionState === "denied") {
+    locationActionHintEl.textContent = "Clock In is disabled because location is blocked for this site. Fix phone/browser settings, reopen the page, then tap Retry / Refresh Location.";
+    return;
+  }
+
+  if (!isValidLocation(lastCapturedLocation)) {
+    locationActionHintEl.textContent = "Clock In is disabled until this page captures a fresh location.";
+    return;
+  }
+
+  if (!isFreshLocation(lastCapturedLocation)) {
+    locationActionHintEl.textContent = "Clock In is disabled because the saved location is stale. Tap Retry / Refresh Location for a fresh fix.";
+    return;
+  }
+
+  locationActionHintEl.textContent = "Fresh location ready. Clock In is available.";
 }
 
 function ensureMap() {
@@ -264,45 +386,73 @@ function resetWorkplaceForm() {
   saveWorkplaceBtnEl.textContent = "Save Workplace";
 }
 
-function renderLocationState(status, location = null) {
-  if (status === "locating") {
-    locationStatusBadgeEl.textContent = "Locating...";
-    locationCoordinatesEl.textContent = "Coordinates: waiting for browser geolocation...";
-    showMapPlaceholder("Waiting for location...", "Locating...");
+function renderLocationState(status, location = lastCapturedLocation) {
+  const badgeLabel = {
+    requesting: "Requesting permission",
+    granted: "Location granted",
+    denied: "Permission denied",
+    blocked: "Location blocked",
+    timeout: "Location timed out",
+    unavailable: "Location unavailable",
+  }[status] || "Location unavailable";
+
+  locationPanelEl.dataset.state = status;
+  locationStatusBadgeEl.textContent = badgeLabel;
+  locationMessageEl.textContent = getLocationUserMessage(status, location);
+  locationHelpPanelEl.classList.toggle("hidden", !(status === "denied" || status === "blocked"));
+
+  if (status === "requesting") {
+    locationCoordinatesEl.textContent = isValidLocation(lastCapturedLocation)
+      ? `Last known coordinates: ${formatCoordinates(lastCapturedLocation.latitude, lastCapturedLocation.longitude)}`
+      : "Coordinates: waiting for browser geolocation...";
+    if (isValidLocation(lastCapturedLocation)) {
+      updateLastLocationDetails(lastCapturedLocation, "Last known location");
+      updateMapPreview(lastCapturedLocation, "Last known location");
+    } else {
+      lastLocationDetailsEl.textContent = "Waiting for a fresh location fix.";
+      showMapPlaceholder("Waiting for a fresh phone location...", badgeLabel);
+    }
+    renderLocationDebug();
+    renderLocationActionHint();
     return;
   }
 
-  if (status === "captured" && location) {
+  if (status === "granted" && isValidLocation(location)) {
     const coordinates = formatCoordinates(location.latitude, location.longitude);
-    locationStatusBadgeEl.textContent = "Location captured";
     locationCoordinatesEl.textContent = `Coordinates: ${coordinates}`;
-    lastLocationDetailsEl.textContent = `Lat/Lon ${coordinates} | Accuracy ${
-      typeof location.accuracy === "number" ? `${location.accuracy.toFixed(1)}m` : "n/a"
-    } | Captured ${formatDateTime(location.capturedAt)}`;
-    updateMapPreview(location, "Last captured location");
+    updateLastLocationDetails(location);
+    updateMapPreview(location, isFreshLocation(location) ? "Fresh captured location" : "Last captured location");
+    renderLocationDebug();
+    renderLocationActionHint();
     return;
   }
 
-  if (status === "denied") {
-    locationStatusBadgeEl.textContent = "Location denied";
-    locationCoordinatesEl.textContent = "Coordinates: unavailable (permission denied).";
-    showMapPlaceholder("Location permission required.", "Location denied");
-    return;
+  if (isValidLocation(lastCapturedLocation)) {
+    locationCoordinatesEl.textContent = `Last known coordinates: ${formatCoordinates(
+      lastCapturedLocation.latitude,
+      lastCapturedLocation.longitude
+    )}`;
+    updateLastLocationDetails(lastCapturedLocation, "Last known location");
+    updateMapPreview(lastCapturedLocation, "Last known location");
+  } else {
+    locationCoordinatesEl.textContent = "Coordinates: unavailable.";
+    lastLocationDetailsEl.textContent = "No location captured yet.";
+    showMapPlaceholder("Location not captured yet.", badgeLabel);
   }
 
-  locationStatusBadgeEl.textContent = "Location unavailable";
-  locationCoordinatesEl.textContent = "Coordinates: unavailable.";
-  showMapPlaceholder("Location not captured yet.", "Location unavailable");
+  renderLocationDebug();
+  renderLocationActionHint();
 }
 
 function renderStatus(status) {
   currentStatus = status || "not_clocked_in";
   statusBadgeEl.textContent = toStatusLabel(currentStatus);
   const canClockInByStatus = currentStatus === "not_clocked_in" || currentStatus === "clocked_out";
-  clockInBtnEl.disabled = !canClockInByStatus || !isValidLocation(lastCapturedLocation);
+  clockInBtnEl.disabled = !canClockInByStatus || (LOCATION_REQUIRED && !isFreshLocation(lastCapturedLocation));
   startBreakBtnEl.disabled = currentStatus !== "clocked_in";
   endBreakBtnEl.disabled = currentStatus !== "on_break";
   clockOutBtnEl.disabled = currentStatus !== "clocked_in";
+  renderLocationActionHint();
 }
 
 function renderAssignedWorkplaceInfo(assignment) {
@@ -352,36 +502,23 @@ function renderGeofenceInfo(geofenceEvaluation) {
 
 function renderHistory(history) {
   if (!Array.isArray(history) || history.length === 0) {
-    historyBodyEl.innerHTML = `<tr><td colspan="8" class="muted">No attendance history yet.</td></tr>`;
+    historyBodyEl.innerHTML = `<tr><td colspan="9" class="muted">No attendance history yet.</td></tr>`;
     return;
   }
 
   historyBodyEl.innerHTML = history
     .map((item) => {
-      const attendanceDate = item.attendanceTimestamp ? item.attendanceTimestamp.slice(0, 10) : "—";
-      const locationSummary = formatCoordinates(item.latitude, item.longitude);
-      const accuracySummary =
-        typeof item.accuracy === "number" ? `${item.accuracy.toFixed(1)} m` : "—";
-      const workplaceDistance = [
-        item.workplaceName || "—",
-        typeof item.distanceMeters === "number" ? `${item.distanceMeters.toFixed(2)} m` : "n/a",
-      ].join(" / ");
-
       return `
-        <tr
-          ${typeof item.latitude === "number" ? `data-latitude="${item.latitude}"` : ""}
-          ${typeof item.longitude === "number" ? `data-longitude="${item.longitude}"` : ""}
-          data-label="${toActionLabel(item.actionType)} ${formatDateTime(item.attendanceTimestamp)}"
-          title="Preview this captured location on the map"
-        >
-          <td>${attendanceDate}</td>
-          <td>${toActionLabel(item.actionType)}</td>
-          <td>${formatDateTime(item.attendanceTimestamp)}</td>
-          <td>${locationSummary}</td>
-          <td>${workplaceDistance}</td>
-          <td>${accuracySummary}</td>
-          <td>${formatDateTime(item.locationCapturedAt)}</td>
-          <td>${item.notes || "—"}</td>
+        <tr>
+          <td>${item.date || "—"}</td>
+          <td>${statusBadgeHtml(item.status)}</td>
+          <td>${formatDateTime(item.timeIn)}</td>
+          <td>${formatBreakList(item.breakStart)}</td>
+          <td>${formatBreakList(item.breakEnd)}</td>
+          <td>${formatDateTime(item.timeOut)}</td>
+          <td>${item.rawDuration || formatDurationMinutes(item.totalMinutes)}</td>
+          <td>${formatHours(item.actualHours)}</td>
+          <td>${formatHours(item.payableHours)}</td>
         </tr>
       `;
     })
@@ -646,6 +783,12 @@ function openScreen(name) {
   timesheetsSectionEl.classList.toggle("hidden", !isTimesheets);
   timeClockSectionEl.classList.toggle("hidden", isWorkplaces || isUsers || isTimesheets);
   historySectionEl.classList.toggle("hidden", isWorkplaces || isUsers || isTimesheets);
+
+  if (name === "time") {
+    requestLocationForTimeClock("time_screen_open").catch(() => {
+      // UI is updated by the location flow itself.
+    });
+  }
 }
 
 async function apiFetch(path, options = {}) {
@@ -665,9 +808,10 @@ async function apiFetch(path, options = {}) {
 
 function getLocationErrorMessage(error) {
   if (!error) return "Location unavailable.";
-  if (error.code === 1) return "Location permission denied by browser.";
-  if (error.code === 3) return "Location request timed out.";
-  return "Location unavailable. Ensure GPS/network location is enabled.";
+  if (error.code === 1) return "Permission denied";
+  if (error.code === 2) return "Position unavailable";
+  if (error.code === 3) return "Timed out";
+  return error.message || "Location unavailable";
 }
 
 function captureLocation() {
@@ -688,30 +832,153 @@ function captureLocation() {
         resolve(payload);
       },
       (error) => reject(error),
-      GEO_OPTIONS
+      GEO_REQUEST_OPTIONS
     );
   });
 }
 
-async function collectActionLocation() {
-  renderLocationState("locating");
+async function updateLocationPermissionState() {
+  if (!navigator.permissions?.query) {
+    locationPermissionState = "unsupported";
+    renderLocationDebug();
+    return locationPermissionState;
+  }
+
+  try {
+    if (!geolocationPermissionStatus) {
+      geolocationPermissionStatus = await navigator.permissions.query({ name: "geolocation" });
+      geolocationPermissionStatus.onchange = () => {
+        locationPermissionState = geolocationPermissionStatus.state;
+        lastLocationCheckAt = new Date().toISOString();
+        logLocationDiagnostic("permission-change", { state: locationPermissionState });
+
+        if (locationPermissionState === "denied") {
+          lastLocationIssue = "Blocked in browser or phone settings";
+          renderLocationState("blocked", lastCapturedLocation);
+        } else if (isValidLocation(lastCapturedLocation)) {
+          renderLocationState("granted", lastCapturedLocation);
+        } else {
+          renderLocationDebug();
+          renderLocationActionHint();
+        }
+      };
+    }
+
+    locationPermissionState = geolocationPermissionStatus.state;
+    lastLocationCheckAt = new Date().toISOString();
+    logLocationDiagnostic("permission-state", { state: locationPermissionState });
+  } catch (error) {
+    locationPermissionState = "unsupported";
+    logLocationDiagnostic("permission-state-unavailable", { message: error.message });
+  }
+
+  renderLocationDebug();
+  return locationPermissionState;
+}
+
+function resolveLocationFailureState(error) {
+  if (!navigator.geolocation) return "unavailable";
+  if (error?.code === 1) return locationPermissionState === "denied" ? "blocked" : "denied";
+  if (error?.code === 3) return "timeout";
+  return "unavailable";
+}
+
+function getLocationFailureUserMessage(status) {
+  if (status === "blocked") {
+    return "Location is blocked. Turn on phone Location Services, allow Safari or Chrome to use location for this site, reopen the page, then tap Retry / Refresh Location.";
+  }
+
+  if (status === "denied") {
+    return "Location permission was denied. Allow it and tap Retry / Refresh Location to continue.";
+  }
+
+  if (status === "timeout") {
+    return "Location request timed out. Move to a clearer signal and try Retry / Refresh Location again.";
+  }
+
+  return "Location is unavailable. Check GPS/network location on your phone, then retry.";
+}
+
+async function requestCurrentLocation({ reason, force = false, silent = false } = {}) {
+  await updateLocationPermissionState();
+
+  if (!force && isFreshLocation(lastCapturedLocation)) {
+    renderLocationState("granted", lastCapturedLocation);
+    return lastCapturedLocation;
+  }
+
+  if (locationPermissionState === "denied") {
+    lastLocationIssue = "Blocked in browser or phone settings";
+    renderLocationState("blocked", lastCapturedLocation);
+    if (!silent && LOCATION_REQUIRED) {
+      throw new Error(getLocationFailureUserMessage("blocked"));
+    }
+    return null;
+  }
+
+  renderLocationState("requesting", lastCapturedLocation);
+  lastLocationCheckAt = new Date().toISOString();
+  logLocationDiagnostic("request-start", {
+    reason,
+    permission: locationPermissionState,
+    hadCachedLocation: isValidLocation(lastCapturedLocation),
+  });
 
   try {
     const location = await captureLocation();
     lastCapturedLocation = location;
-    renderLocationState("captured", location);
+    locationPermissionState = "granted";
+    lastLocationIssue = "";
+    lastLocationCheckAt = location.capturedAt;
+    logLocationDiagnostic("request-success", {
+      reason,
+      accuracy: location.accuracy,
+      fresh: isFreshLocation(location),
+    });
+    renderLocationState("granted", location);
     return location;
   } catch (error) {
-    const denied = error && error.code === 1;
-    renderLocationState(denied ? "denied" : "unavailable");
-
-    if (LOCATION_REQUIRED) {
-      throw new Error(
-        `${getLocationErrorMessage(error)} Enable location permission to complete attendance actions.`
-      );
+    const state = resolveLocationFailureState(error);
+    lastLocationIssue = getLocationErrorMessage(error);
+    lastLocationCheckAt = new Date().toISOString();
+    logLocationDiagnostic("request-error", {
+      reason,
+      state,
+      code: error?.code || null,
+      message: getLocationErrorMessage(error),
+    });
+    renderLocationState(state, lastCapturedLocation);
+    if (!silent && LOCATION_REQUIRED) {
+      throw new Error(getLocationFailureUserMessage(state));
     }
-
     return null;
+  }
+}
+
+async function requestLocationForTimeClock(reason) {
+  if (!LOCATION_REQUIRED || !currentUser || currentUser.role === "admin") {
+    renderStatus(currentStatus);
+    return null;
+  }
+
+  try {
+    return await requestCurrentLocation({ reason, force: !isFreshLocation(lastCapturedLocation), silent: true });
+  } finally {
+    renderStatus(currentStatus);
+  }
+}
+
+async function ensureClockInLocation() {
+  if (isFreshLocation(lastCapturedLocation)) {
+    renderLocationState("granted", lastCapturedLocation);
+    return lastCapturedLocation;
+  }
+
+  try {
+    return await requestCurrentLocation({ reason: "clock_in_first_attempt", force: true, silent: false });
+  } catch (firstError) {
+    logLocationDiagnostic("clock-in-retry", { message: firstError.message });
+    return requestCurrentLocation({ reason: "clock_in_retry", force: true, silent: false });
   }
 }
 
@@ -730,7 +997,9 @@ function setLoggedOutState() {
   signupPasswordEl.value = "";
   signupConfirmPasswordEl.value = "";
   lastCapturedLocation = null;
-  renderLocationState("unavailable");
+  lastLocationIssue = "";
+  lastLocationCheckAt = null;
+  renderLocationState(locationPermissionState === "denied" ? "blocked" : "unavailable");
   renderGeofenceInfo(null);
   renderAssignedWorkplaceInfo(null);
   lastLocationDetailsEl.textContent = "No location captured yet.";
@@ -752,8 +1021,8 @@ async function loadStatus() {
 }
 
 async function loadHistory() {
-  const data = await apiFetch("/api/time/history");
-  renderHistory(data?.history || []);
+  const data = await apiFetch("/api/time/shifts");
+  renderHistory(data?.shifts || []);
 }
 
 async function loadWorkplaces() {
@@ -779,13 +1048,17 @@ async function loadWorkerAssignments() {
 
 async function doAction(actionType) {
   setError(actionErrorEl, "");
-  if (actionType === "clock_in" && !isValidLocation(lastCapturedLocation)) {
-    setError(actionErrorEl, "Location is required before clocking in.");
-    return;
-  }
-
   const notes = notesEl.value.trim();
-  const location = await collectActionLocation();
+  const location =
+    actionType === "clock_in"
+      ? await ensureClockInLocation()
+      : await requestCurrentLocation({ reason: actionType, force: true, silent: false });
+
+  if (LOCATION_REQUIRED && !isFreshLocation(location)) {
+    const message = "Clock In requires a fresh location. Tap Retry / Refresh Location and try again.";
+    setError(actionErrorEl, message);
+    throw new Error(message);
+  }
 
   const actionResult = await apiFetch("/api/time/actions", {
     method: "POST",
@@ -805,7 +1078,7 @@ async function doAction(actionType) {
 async function refreshLocation() {
   setError(actionErrorEl, "");
   try {
-    await collectActionLocation();
+    await requestCurrentLocation({ reason: "manual_refresh", force: true, silent: false });
     renderStatus(currentStatus);
   } catch (error) {
     setError(actionErrorEl, error.message);
@@ -815,7 +1088,7 @@ async function refreshLocation() {
 
 async function refreshLocationSilently() {
   try {
-    await collectActionLocation();
+    await requestLocationForTimeClock("silent_refresh");
   } catch {
     // Keep existing status UI and button gating when location is unavailable.
   } finally {
@@ -839,9 +1112,9 @@ async function login() {
   authToken = data.token;
   localStorage.setItem(TOKEN_KEY, authToken);
   setLoggedInState();
-  renderLocationState("unavailable");
+  openScreen("time");
   await Promise.all([loadStatus(), loadHistory()]);
-  await refreshLocationSilently();
+  await requestLocationForTimeClock("worker_login");
 }
 
 async function loginAsAdmin() {
@@ -860,9 +1133,7 @@ async function loginAsAdmin() {
   authToken = data.token;
   localStorage.setItem(TOKEN_KEY, authToken);
   setLoggedInState();
-  renderLocationState("unavailable");
   await Promise.all([loadStatus(), loadHistory()]);
-  await refreshLocationSilently();
 
   openScreen("users");
   await loadAdminUsers();
@@ -912,9 +1183,9 @@ async function signup() {
   authToken = data.token;
   localStorage.setItem(TOKEN_KEY, authToken);
   setLoggedInState();
-  renderLocationState("unavailable");
+  openScreen("time");
   await Promise.all([loadStatus(), loadHistory()]);
-  await refreshLocationSilently();
+  await requestLocationForTimeClock("worker_signup");
 }
 
 async function handleWorkplaceFormSubmit(event) {
@@ -960,8 +1231,10 @@ async function initFromSession() {
   try {
     await Promise.all([loadStatus(), loadHistory()]);
     setLoggedInState();
-    renderLocationState("unavailable");
-    await refreshLocationSilently();
+    if (currentUser?.role !== "admin") {
+      openScreen("time");
+      await requestLocationForTimeClock("session_restore");
+    }
   } catch (error) {
     setLoggedOutState();
   }
@@ -970,6 +1243,7 @@ async function initFromSession() {
 function startLiveClock() {
   const render = () => {
     liveClockEl.textContent = new Date().toLocaleString();
+    renderStatus(currentStatus);
   };
   render();
   liveClockIntervalId = setInterval(render, 1000);
@@ -1138,7 +1412,7 @@ function formatBreakList(arr) {
 
 function renderTimesheets(timesheets) {
   if (!Array.isArray(timesheets) || timesheets.length === 0) {
-    timesheetsBodyEl.innerHTML = `<tr><td colspan="12" class="muted">No timesheets found.</td></tr>`;
+    timesheetsBodyEl.innerHTML = `<tr><td colspan="14" class="muted">No timesheets found.</td></tr>`;
     return;
   }
 
@@ -1159,7 +1433,9 @@ function renderTimesheets(timesheets) {
         <td>${formatBreakList(ts.breakStartAt)}</td>
         <td>${formatBreakList(ts.breakEndAt)}</td>
         <td>${formatDateTime(ts.clockOutAt)}</td>
-        <td>${ts.totalHours != null ? ts.totalHours : "—"}</td>
+        <td>${ts.rawDuration || formatDurationMinutes(ts.totalMinutes)}</td>
+        <td>${formatHours(ts.actualHours)}</td>
+        <td>${formatHours(ts.payableHours)}</td>
         <td>${ts.workplaceName || "—"}</td>
         <td>${locationCell}</td>
         <td>${ts.clockInNotes || ts.clockOutNotes || "—"}</td>
@@ -1257,7 +1533,10 @@ function renderTimesheetDetail(detail) {
       ${field("Status", detail.status)}
       ${field("Clock In", formatDateTime(detail.clockInAt))}
       ${field("Clock Out", formatDateTime(detail.clockOutAt))}
-      ${field("Total Hours", detail.totalHours != null ? detail.totalHours : "—")}
+      ${field("Raw Duration", detail.rawDuration || formatDurationMinutes(detail.totalMinutes))}
+      ${field("Actual Hours", formatHours(detail.actualHours))}
+      ${field("Payable Hours", formatHours(detail.payableHours))}
+      ${field("Break Minutes", typeof detail.breakMinutes === "number" ? detail.breakMinutes : "—")}
       ${field("Workplace", detail.workplaceName)}
       ${field("Geofence", geofenceStr)}
       ${field("Distance", distanceStr)}
@@ -1388,6 +1667,10 @@ startLiveClock();
 resetWorkplaceForm();
 showMapPlaceholder("Location not captured yet.", "Waiting for location");
 consumeAuthErrorFromUrl();
+updateLocationPermissionState().catch(() => {
+  locationPermissionState = "unsupported";
+  renderLocationDebug();
+});
 initFromSession();
 
 window.addEventListener("beforeunload", () => {
