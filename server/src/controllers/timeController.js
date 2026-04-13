@@ -25,6 +25,12 @@ export async function actionController(req, res) {
       ...result,
     });
   } catch (error) {
+    console.error("[time.action] failed", {
+      userId: req.user?.id || null,
+      actionType: req.body?.actionType || null,
+      message: error?.message || "unknown_error",
+      name: error?.name || "Error",
+    });
     const err = toHttpError(error);
     res.status(err.status).json({ error: err.message });
   }

@@ -27,6 +27,7 @@ const statusBadgeEl = document.getElementById("statusBadge");
 const assignedWorkplaceInfoEl = document.getElementById("assignedWorkplaceInfo");
 const geofenceInfoEl = document.getElementById("geofenceInfo");
 const actionErrorEl = document.getElementById("actionError");
+const actionFeedbackEl = document.getElementById("actionFeedback");
 const notesEl = document.getElementById("notes");
 const clockInBtnEl = document.getElementById("clockInBtn");
 const startBreakBtnEl = document.getElementById("startBreakBtn");
@@ -111,6 +112,28 @@ let locationPermissionState = "unknown";
 let geolocationPermissionStatus = null;
 let lastLocationIssue = "";
 let lastLocationCheckAt = null;
+let actionInProgress = null;
+let actionUiResetTimer = null;
+
+const ACTION_BUTTONS = {
+  clock_in: clockInBtnEl,
+  break_start: startBreakBtnEl,
+  break_end: endBreakBtnEl,
+  clock_out: clockOutBtnEl,
+};
+
+const ACTION_LABELS = {
+  clock_in: "Clock In",
+  break_start: "Start Break",
+  break_end: "End Break",
+  clock_out: "Clock Out",
+};
+
+for (const [actionType, button] of Object.entries(ACTION_BUTTONS)) {
+  if (!button) continue;
+  button.dataset.actionType = actionType;
+  button.dataset.defaultLabel = ACTION_LABELS[actionType];
+}
 
 const API_BASE_URL = (() => {
   const configured = window.TIME_CLOCK_API_BASE_URL;
@@ -135,6 +158,58 @@ function setError(el, message) {
 
 function setInfo(el, message) {
   el.textContent = message || "";
+}
+
+function setActionFeedback(message, tone = "info") {
+  if (!actionFeedbackEl) return;
+  actionFeedbackEl.textContent = message || "";
+  actionFeedbackEl.className = `action-feedback ${tone}`;
+  actionFeedbackEl.classList.toggle("hidden", !message);
+}
+
+function resetActionButtonVisualState() {
+  if (actionUiResetTimer) {
+    clearTimeout(actionUiResetTimer);
+    actionUiResetTimer = null;
+  }
+
+  for (const button of Object.values(ACTION_BUTTONS)) {
+    if (!button) continue;
+    button.classList.remove("is-loading", "is-success", "is-failure");
+    if (button.dataset.defaultLabel) {
+      button.textContent = button.dataset.defaultLabel;
+    }
+  }
+}
+
+function beginActionVisualState(actionType) {
+  const button = ACTION_BUTTONS[actionType];
+  if (!button) return;
+
+  actionInProgress = actionType;
+  resetActionButtonVisualState();
+  button.classList.add("is-loading");
+  button.textContent = `${button.dataset.defaultLabel || ACTION_LABELS[actionType]}...`;
+  renderStatus(currentStatus);
+}
+
+function completeActionVisualState(actionType, isSuccess) {
+  const button = ACTION_BUTTONS[actionType];
+  actionInProgress = null;
+  renderStatus(currentStatus);
+
+  if (!button) return;
+
+  button.classList.remove("is-loading");
+  button.classList.add(isSuccess ? "is-success" : "is-failure");
+  if (isSuccess) {
+    button.textContent = `${button.dataset.defaultLabel || ACTION_LABELS[actionType]} Done`;
+  }
+
+  actionUiResetTimer = setTimeout(() => {
+    resetActionButtonVisualState();
+    renderStatus(currentStatus);
+  }, isSuccess ? 1400 : 2200);
 }
 
 function logLocationDiagnostic(event, details = {}) {
@@ -447,6 +522,16 @@ function renderLocationState(status, location = lastCapturedLocation) {
 function renderStatus(status) {
   currentStatus = status || "not_clocked_in";
   statusBadgeEl.textContent = toStatusLabel(currentStatus);
+
+  if (actionInProgress) {
+    clockInBtnEl.disabled = true;
+    startBreakBtnEl.disabled = true;
+    endBreakBtnEl.disabled = true;
+    clockOutBtnEl.disabled = true;
+    renderLocationActionHint();
+    return;
+  }
+
   const canClockInByStatus = currentStatus === "not_clocked_in" || currentStatus === "clocked_out";
   clockInBtnEl.disabled = !canClockInByStatus || (LOCATION_REQUIRED && !isFreshLocation(lastCapturedLocation));
   startBreakBtnEl.disabled = currentStatus !== "clocked_in";
@@ -510,15 +595,15 @@ function renderHistory(history) {
     .map((item) => {
       return `
         <tr>
-          <td>${item.date || "—"}</td>
-          <td>${statusBadgeHtml(item.status)}</td>
-          <td>${formatDateTime(item.timeIn)}</td>
-          <td>${formatBreakList(item.breakStart)}</td>
-          <td>${formatBreakList(item.breakEnd)}</td>
-          <td>${formatDateTime(item.timeOut)}</td>
-          <td>${item.rawDuration || formatDurationMinutes(item.totalMinutes)}</td>
-          <td>${formatHours(item.actualHours)}</td>
-          <td>${formatHours(item.payableHours)}</td>
+          <td data-label="Date">${item.date || "—"}</td>
+          <td data-label="Status">${statusBadgeHtml(item.status)}</td>
+          <td data-label="Clock In">${formatDateTime(item.timeIn)}</td>
+          <td data-label="Break Start">${formatBreakList(item.breakStart)}</td>
+          <td data-label="Break End">${formatBreakList(item.breakEnd)}</td>
+          <td data-label="Clock Out">${formatDateTime(item.timeOut)}</td>
+          <td data-label="Raw Duration">${item.rawDuration || formatDurationMinutes(item.totalMinutes)}</td>
+          <td data-label="Actual Hrs">${formatHours(item.actualHours)}</td>
+          <td data-label="Payable Hrs">${formatHours(item.payableHours)}</td>
         </tr>
       `;
     })
@@ -1046,6 +1131,14 @@ async function loadWorkerAssignments() {
 
 async function doAction(actionType) {
   setError(actionErrorEl, "");
+  setActionFeedback("", "info");
+
+  beginActionVisualState(actionType);
+
+  const actionLabel = ACTION_LABELS[actionType] || "Action";
+  setActionFeedback("Capturing fresh location...", "info");
+
+  try {
   const notes = notesEl.value.trim();
   const location =
     actionType === "clock_in"
@@ -1057,6 +1150,8 @@ async function doAction(actionType) {
     setError(actionErrorEl, message);
     throw new Error(message);
   }
+
+  setActionFeedback(`Submitting ${actionLabel.toLowerCase()}...`, "info");
 
   const actionResult = await apiFetch("/api/time/actions", {
     method: "POST",
@@ -1071,6 +1166,13 @@ async function doAction(actionType) {
 
   notesEl.value = "";
   await Promise.all([loadStatus(), loadHistory()]);
+  setActionFeedback(`${actionLabel} recorded successfully.`, "success");
+  completeActionVisualState(actionType, true);
+  } catch (error) {
+    setActionFeedback(error.message || "Action failed", "error");
+    completeActionVisualState(actionType, false);
+    throw error;
+  }
 }
 
 async function refreshLocation() {

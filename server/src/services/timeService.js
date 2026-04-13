@@ -9,6 +9,7 @@ import {
 } from "../models/timeLogModel.js";
 import { findUserById } from "../models/userModel.js";
 import { findWorkplaceById } from "../models/workplaceModel.js";
+import { findWorkplaceByIdFromCrm } from "../models/crmWorkplaceModel.js";
 import { calculateDistanceMeters } from "./geofenceService.js";
 import { buildShiftHourSummary } from "./payableHoursService.js";
 import { HttpError } from "../utils/errors.js";
@@ -139,7 +140,19 @@ async function resolveWorkplaceAssignment(userId) {
   const user = await findUserById(userId);
   if (!user) throw new HttpError(404, "User not found");
 
-  const workplaceId = user.profile?.assignedWorkplaceId || null;
+  const workplaceIdRaw = user.profile?.assignedWorkplaceId;
+  const workplaceId = typeof workplaceIdRaw === "string" ? workplaceIdRaw.trim() : "";
+
+  if (workplaceIdRaw !== null && workplaceIdRaw !== undefined && !workplaceId) {
+    return {
+      assignmentRequired: true,
+      assignment: null,
+      workplace: null,
+      assignmentInvalid: true,
+      issue: "Assigned workplace reference is invalid. Please contact your admin.",
+    };
+  }
+
   if (!workplaceId) {
     return {
       assignmentRequired: false,
@@ -148,7 +161,17 @@ async function resolveWorkplaceAssignment(userId) {
     };
   }
 
-  const workplace = await findWorkplaceById(workplaceId);
+  let workplace = null;
+  try {
+    workplace = await findWorkplaceByIdFromCrm(workplaceId);
+  } catch {
+    workplace = null;
+  }
+
+  if (!workplace) {
+    workplace = await findWorkplaceById(workplaceId);
+  }
+
   return {
     assignmentRequired: true,
     assignment: workplaceId,
@@ -156,8 +179,47 @@ async function resolveWorkplaceAssignment(userId) {
   };
 }
 
+function normalizeGeofenceInputs(workplace) {
+  const latitude = Number(workplace?.latitude);
+  const longitude = Number(workplace?.longitude);
+  const radiusMeters = Number(workplace?.geofenceRadiusMeters);
+
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+    return { valid: false, issue: "Assigned workplace latitude is not configured correctly" };
+  }
+
+  if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+    return { valid: false, issue: "Assigned workplace longitude is not configured correctly" };
+  }
+
+  if (!Number.isFinite(radiusMeters) || radiusMeters <= 0) {
+    return { valid: false, issue: "Assigned workplace geofence radius is not configured correctly" };
+  }
+
+  return {
+    valid: true,
+    latitude,
+    longitude,
+    radiusMeters,
+  };
+}
+
 async function evaluateGeofenceForAction(userId, location) {
   const assignment = await resolveWorkplaceAssignment(userId);
+  if (assignment.assignmentInvalid) {
+    return {
+      assignmentRequired: true,
+      workplaceId: null,
+      workplaceName: null,
+      radiusMeters: null,
+      distanceMeters: null,
+      withinGeofence: null,
+      enforcementEnabled: ENFORCE_CLOCKIN_GEOFENCE,
+      assignmentInvalid: true,
+      issue: assignment.issue,
+    };
+  }
+
   if (!assignment.assignmentRequired) {
     return {
       assignmentRequired: false,
@@ -180,6 +242,22 @@ async function evaluateGeofenceForAction(userId, location) {
       withinGeofence: null,
       enforcementEnabled: ENFORCE_CLOCKIN_GEOFENCE,
       assignmentUnavailable: true,
+      issue: "Assigned workplace is unavailable or inactive",
+    };
+  }
+
+  const normalizedInputs = normalizeGeofenceInputs(assignment.workplace);
+  if (!normalizedInputs.valid) {
+    return {
+      assignmentRequired: true,
+      workplaceId: assignment.workplace.id,
+      workplaceName: assignment.workplace.name,
+      radiusMeters: null,
+      distanceMeters: null,
+      withinGeofence: null,
+      enforcementEnabled: ENFORCE_CLOCKIN_GEOFENCE,
+      assignmentInvalid: true,
+      issue: normalizedInputs.issue,
     };
   }
 
@@ -188,7 +266,7 @@ async function evaluateGeofenceForAction(userId, location) {
       assignmentRequired: true,
       workplaceId: assignment.workplace.id,
       workplaceName: assignment.workplace.name,
-      radiusMeters: assignment.workplace.geofenceRadiusMeters,
+      radiusMeters: normalizedInputs.radiusMeters,
       distanceMeters: null,
       withinGeofence: null,
       enforcementEnabled: ENFORCE_CLOCKIN_GEOFENCE,
@@ -197,10 +275,10 @@ async function evaluateGeofenceForAction(userId, location) {
 
   const distanceMeters = calculateDistanceMeters(
     { latitude: location.latitude, longitude: location.longitude },
-    { latitude: assignment.workplace.latitude, longitude: assignment.workplace.longitude }
+    { latitude: normalizedInputs.latitude, longitude: normalizedInputs.longitude }
   );
 
-  const radiusMeters = assignment.workplace.geofenceRadiusMeters;
+  const radiusMeters = normalizedInputs.radiusMeters;
   const withinGeofence = distanceMeters <= radiusMeters;
 
   return {
@@ -241,7 +319,11 @@ export async function performAction(userId, actionType, notes, location) {
     if (openShift) throw new HttpError(409, "Cannot clock in: shift already open");
 
     if (geofenceEvaluation.assignmentUnavailable) {
-      throw new HttpError(409, "Assigned workplace is unavailable or inactive");
+      throw new HttpError(409, geofenceEvaluation.issue || "Assigned workplace is unavailable or inactive");
+    }
+
+    if (geofenceEvaluation.assignmentInvalid) {
+      throw new HttpError(409, geofenceEvaluation.issue || "Assigned workplace geofence is not configured correctly");
     }
 
     if (
