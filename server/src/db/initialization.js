@@ -46,7 +46,12 @@ export async function initializeDatabase() {
     initializePool();
     console.log("Connected to PostgreSQL");
 
-    // Create schema if not exists
+    // Apply alterations FIRST to add missing columns to existing tables.
+    // For new databases these are no-ops; for existing databases they add
+    // any columns that were introduced after the initial schema was created.
+    await applySchemaAlterations();
+
+    // Create schema if not exists (safe for both new and existing databases)
     await initializeSchema();
     schemaInitialized = true;
 
@@ -57,9 +62,6 @@ export async function initializeDatabase() {
       await migrateFromJsonIfExists();
       await setSchemaVersion(1);
     }
-
-    // Apply incremental schema migrations for existing databases
-    await applySchemaAlterations();
 
     isInitialized = true;
     lastInitializationError = null;
