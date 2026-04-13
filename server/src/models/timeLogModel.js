@@ -65,6 +65,17 @@ function normalizeDbShift(dbShift, breaks = []) {
   };
 }
 
+function safeJsonParse(value, label) {
+  if (!value) return null;
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    console.warn(`[normalizeDbTimeLog] Failed to parse ${label}:`, String(value).slice(0, 80));
+    return null;
+  }
+}
+
 function normalizeDbTimeLog(dbLog) {
   return {
     id: dbLog.id,
@@ -72,8 +83,8 @@ function normalizeDbTimeLog(dbLog) {
     shiftId: dbLog.shift_id,
     actionType: dbLog.action_type,
     timestamp: dbLog.timestamp,
-    location: dbLog.location ? (typeof dbLog.location === "string" ? JSON.parse(dbLog.location) : dbLog.location) : null,
-    geofence: dbLog.geofence ? (typeof dbLog.geofence === "string" ? JSON.parse(dbLog.geofence) : dbLog.geofence) : null,
+    location: safeJsonParse(dbLog.location, "location"),
+    geofence: safeJsonParse(dbLog.geofence, "geofence"),
     notes: dbLog.notes,
     createdAt: dbLog.created_at,
   };

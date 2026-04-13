@@ -1139,38 +1139,53 @@ async function doAction(actionType) {
   setActionFeedback("Capturing fresh location...", "info");
 
   try {
-  const notes = notesEl.value.trim();
-  const location =
-    actionType === "clock_in"
-      ? await ensureClockInLocation()
-      : await requestCurrentLocation({ reason: actionType, force: true, silent: false });
+    const notes = notesEl.value.trim();
 
-  if (LOCATION_REQUIRED && !isFreshLocation(location)) {
-    const message = "Clock In requires a fresh location. Tap Retry / Refresh Location and try again.";
-    setError(actionErrorEl, message);
-    throw new Error(message);
-  }
+    // For clock_in, always get a fresh GPS fix with a retry.
+    // For break/clock-out actions, use the cached location if it's still fresh
+    // (avoids unnecessary slow GPS re-requests on mobile Safari during breaks).
+    const location =
+      actionType === "clock_in"
+        ? await ensureClockInLocation()
+        : await requestCurrentLocation({ reason: actionType, force: !isFreshLocation(lastCapturedLocation), silent: false });
 
-  setActionFeedback(`Submitting ${actionLabel.toLowerCase()}...`, "info");
+    if (LOCATION_REQUIRED && !isFreshLocation(location)) {
+      const message = `${actionLabel} requires a fresh location. Tap Retry / Refresh Location and try again.`;
+      setError(actionErrorEl, message);
+      throw new Error(message);
+    }
 
-  const actionResult = await apiFetch("/api/time/actions", {
-    method: "POST",
-    body: JSON.stringify({
-      actionType,
-      notes: notes || undefined,
-      location: location || undefined,
-    }),
-  });
+    setActionFeedback(`Submitting ${actionLabel.toLowerCase()}...`, "info");
 
-  renderGeofenceInfo(actionResult?.geofenceEvaluation || null);
+    const actionResult = await apiFetch("/api/time/actions", {
+      method: "POST",
+      body: JSON.stringify({
+        actionType,
+        notes: notes || undefined,
+        location: location || undefined,
+      }),
+    });
 
-  notesEl.value = "";
-  await Promise.all([loadStatus(), loadHistory()]);
-  setActionFeedback(`${actionLabel} recorded successfully.`, "success");
-  completeActionVisualState(actionType, true);
+    // ── Action committed on the server ────────────────────────────────────────
+    // Show success immediately. Status/history refreshes happen independently so
+    // a transient network hiccup on the history endpoint does NOT make this look
+    // like a failed action to the worker.
+    notesEl.value = "";
+    renderGeofenceInfo(actionResult?.geofenceEvaluation || null);
+    setActionFeedback(`${actionLabel} recorded successfully.`, "success");
+    completeActionVisualState(actionType, true);
+
+    // Fire-and-forget: update button states and history list.
+    loadStatus().catch((e) => console.warn("[doAction] Status refresh failed:", e.message));
+    loadHistory().catch((e) => console.warn("[doAction] History refresh failed:", e.message));
   } catch (error) {
     setActionFeedback(error.message || "Action failed", "error");
     completeActionVisualState(actionType, false);
+
+    // Refresh status silently so buttons reflect the real server state after a
+    // failure (avoids stale button states if the server-side status drifted).
+    loadStatus().catch((e) => console.warn("[doAction] Status refresh after failure:", e.message));
+
     throw error;
   }
 }

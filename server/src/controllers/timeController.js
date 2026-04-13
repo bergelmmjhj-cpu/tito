@@ -31,9 +31,15 @@ export async function actionController(req, res) {
       ...result,
     });
   } catch (error) {
+    const location = req.body?.location;
     console.error("[time.action] failed", {
       userId: req.user?.id || null,
       actionType: req.body?.actionType || null,
+      hasLocation: Boolean(location),
+      locationLat: location?.latitude ?? null,
+      locationLng: location?.longitude ?? null,
+      isHttpError: error?.name === "HttpError",
+      httpStatus: error?.status ?? null,
       message: error?.message || "unknown_error",
       name: error?.name || "Error",
       stack: error?.stack || "no_stack",

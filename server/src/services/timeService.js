@@ -315,14 +315,30 @@ export async function performAction(userId, actionType, notes, location) {
   const openShift = await getOpenShiftForUser(userId);
   const activeBreak = getActiveBreak(openShift);
 
+  const logCtx = {
+    userId,
+    action: normalizedAction,
+    hasLocation: Boolean(cleanLocation),
+    workplaceId: geofenceEvaluation.workplaceId ?? null,
+    withinGeofence: geofenceEvaluation.withinGeofence ?? null,
+    geofenceEnforced: geofenceEvaluation.enforcementEnabled ?? false,
+    openShiftId: openShift?.id ?? null,
+    activeBreakId: activeBreak?.id ?? null,
+  };
+
   if (normalizedAction === "clock_in") {
-    if (openShift) throw new HttpError(409, "Cannot clock in: shift already open");
+    if (openShift) {
+      console.warn("[performAction] rejected", { ...logCtx, reason: "shift_already_open" });
+      throw new HttpError(409, "Cannot clock in: shift already open");
+    }
 
     if (geofenceEvaluation.assignmentUnavailable) {
+      console.warn("[performAction] rejected", { ...logCtx, reason: "workplace_unavailable" });
       throw new HttpError(409, geofenceEvaluation.issue || "Assigned workplace is unavailable or inactive");
     }
 
     if (geofenceEvaluation.assignmentInvalid) {
+      console.warn("[performAction] rejected", { ...logCtx, reason: "workplace_invalid" });
       throw new HttpError(409, geofenceEvaluation.issue || "Assigned workplace geofence is not configured correctly");
     }
 
@@ -331,6 +347,12 @@ export async function performAction(userId, actionType, notes, location) {
       geofenceEvaluation.assignmentRequired &&
       geofenceEvaluation.withinGeofence === false
     ) {
+      console.warn("[performAction] rejected", {
+        ...logCtx,
+        reason: "outside_geofence",
+        distanceMeters: geofenceEvaluation.distanceMeters,
+        radiusMeters: geofenceEvaluation.radiusMeters,
+      });
       throw new HttpError(
         403,
         `Clock in blocked: ${geofenceEvaluation.distanceMeters}m from ${geofenceEvaluation.workplaceName} (limit ${geofenceEvaluation.radiusMeters}m)`
@@ -339,16 +361,34 @@ export async function performAction(userId, actionType, notes, location) {
 
     await saveClockIn(userId, cleanNotes, cleanLocation, geofenceEvaluation);
   } else if (normalizedAction === "break_start") {
-    if (!openShift) throw new HttpError(409, "Cannot start break: not clocked in");
-    if (activeBreak) throw new HttpError(409, "Cannot start break: break already active");
+    if (!openShift) {
+      console.warn("[performAction] rejected", { ...logCtx, reason: "not_clocked_in" });
+      throw new HttpError(409, "Cannot start break: not clocked in");
+    }
+    if (activeBreak) {
+      console.warn("[performAction] rejected", { ...logCtx, reason: "break_already_active" });
+      throw new HttpError(409, "Cannot start break: break already active");
+    }
     await saveStartBreak(userId, cleanNotes, cleanLocation, geofenceEvaluation);
   } else if (normalizedAction === "break_end") {
-    if (!openShift) throw new HttpError(409, "Cannot end break: not clocked in");
-    if (!activeBreak) throw new HttpError(409, "Cannot end break: no active break");
+    if (!openShift) {
+      console.warn("[performAction] rejected", { ...logCtx, reason: "not_clocked_in" });
+      throw new HttpError(409, "Cannot end break: not clocked in");
+    }
+    if (!activeBreak) {
+      console.warn("[performAction] rejected", { ...logCtx, reason: "no_active_break" });
+      throw new HttpError(409, "Cannot end break: no active break");
+    }
     await saveEndBreak(userId, cleanNotes, cleanLocation, geofenceEvaluation);
   } else if (normalizedAction === "clock_out") {
-    if (!openShift) throw new HttpError(409, "Cannot clock out: not clocked in");
-    if (activeBreak) throw new HttpError(409, "Cannot clock out during break");
+    if (!openShift) {
+      console.warn("[performAction] rejected", { ...logCtx, reason: "not_clocked_in" });
+      throw new HttpError(409, "Cannot clock out: not clocked in");
+    }
+    if (activeBreak) {
+      console.warn("[performAction] rejected", { ...logCtx, reason: "active_break_open" });
+      throw new HttpError(409, "Cannot clock out during break");
+    }
     await saveClockOut(userId, cleanNotes, cleanLocation, geofenceEvaluation);
   } else {
     throw new HttpError(400, "Invalid actionType");

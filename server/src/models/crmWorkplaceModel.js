@@ -33,7 +33,7 @@ function normalizeDbWorkplace(dbRow) {
     longitude: dbRow.longitude || 0,
     geofenceRadiusMeters: dbRow.geofence_radius_meters || 150,
     active: dbRow.active !== false,
-    crm: dbRow.crm ? (typeof dbRow.crm === "string" ? JSON.parse(dbRow.crm) : dbRow.crm) : {},
+    crm: (() => { try { return dbRow.crm ? (typeof dbRow.crm === "string" ? JSON.parse(dbRow.crm) : dbRow.crm) : {}; } catch { return {}; } })(),
     createdAt: dbRow.created_at,
     updatedAt: dbRow.updated_at,
   };
