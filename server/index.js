@@ -8,12 +8,14 @@ import {
   getStorageMode,
   initializeDatabase,
 } from "./src/db/initialization.js";
+import { initializeCrmPool, isCrmPoolReady } from "./src/db/crmPool.js";
 import { ensureBootstrapAdminExists } from "./src/services/adminBootstrapService.js";
 import { createAuthRouter } from "./src/routes/authRoutes.js";
 import { createTimeRoutes } from "./src/routes/timeRoutes.js";
 import { createLegacyRoutes } from "./src/routes/legacyRoutes.js";
 import { createWorkplaceRoutes } from "./src/routes/workplaceRoutes.js";
 import { createAdminRoutes } from "./src/routes/adminRoutes.js";
+import { createCrmRoutes } from "./src/routes/crmRoutes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -33,6 +35,13 @@ async function startServer() {
     console.log(
       `[startup] database_initialized=${initDiagnostics.initialized} schema_initialized=${initDiagnostics.schemaInitialized}`
     );
+
+    try {
+      initializeCrmPool();
+      console.log(`[startup] crm_database_initialized=${isCrmPoolReady()}`);
+    } catch (error) {
+      console.warn(`[startup] crm_database_initialization_failed: ${error.message}`);
+    }
 
     try {
       const result = await ensureBootstrapAdminExists("startup_bootstrap");
@@ -64,6 +73,7 @@ async function startServer() {
         environment,
         storageMode: getStorageMode(),
         databaseConnected: dbConnected,
+        crmDatabaseConnected: isCrmPoolReady(),
         timestamp: new Date().toISOString(),
       });
     });
@@ -71,6 +81,7 @@ async function startServer() {
     app.use("/api/auth", createAuthRouter());
     app.use("/api/time", createTimeRoutes());
     app.use("/api/workplaces", createWorkplaceRoutes());
+    app.use("/api/crm", createCrmRoutes());
     app.use("/api/admin", createAdminRoutes());
     app.use("/", createLegacyRoutes());
 
