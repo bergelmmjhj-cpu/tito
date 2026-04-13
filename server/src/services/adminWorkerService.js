@@ -1,5 +1,6 @@
 import { listUsers, findUserById, updateUserById } from "../models/userModel.js";
 import { findWorkplaceById, listWorkplaces } from "../models/workplaceModel.js";
+import { findWorkplaceByIdFromCrm, listWorkplacesFromCrm } from "../models/crmWorkplaceModel.js";
 import { HttpError } from "../utils/errors.js";
 
 function sanitizeWorker(worker) {
@@ -19,7 +20,18 @@ function sanitizeWorker(worker) {
 
 async function toWorkerWithWorkplace(worker) {
   const workplaceId = worker.profile?.assignedWorkplaceId || null;
-  const workplace = workplaceId ? await findWorkplaceById(workplaceId) : null;
+  let workplace = null;
+  if (workplaceId) {
+    try {
+      workplace = await findWorkplaceByIdFromCrm(workplaceId);
+    } catch {
+      // Ignore CRM lookup errors and try local fallback.
+    }
+
+    if (!workplace) {
+      workplace = await findWorkplaceById(workplaceId);
+    }
+  }
 
   return {
     ...sanitizeWorker(worker),
@@ -55,7 +67,19 @@ export async function assignWorkerToWorkplace(workerUserId, workplaceId) {
       throw new HttpError(400, "workplaceId must be a string or null");
     }
 
-    const workplace = await findWorkplaceById(workplaceId.trim());
+    const cleanWorkplaceId = workplaceId.trim();
+    let workplace = null;
+
+    try {
+      workplace = await findWorkplaceByIdFromCrm(cleanWorkplaceId);
+    } catch {
+      // Ignore CRM lookup errors and try local fallback.
+    }
+
+    if (!workplace) {
+      workplace = await findWorkplaceById(cleanWorkplaceId);
+    }
+
     if (!workplace) throw new HttpError(404, "Workplace not found");
     if (workplace.active === false) {
       throw new HttpError(400, "Cannot assign inactive workplace");
@@ -77,7 +101,18 @@ export async function assignWorkerToWorkplace(workerUserId, workplaceId) {
 }
 
 export async function listAssignableWorkplaces() {
-  const workplaces = await listWorkplaces();
+  let workplaces = [];
+
+  try {
+    workplaces = await listWorkplacesFromCrm();
+  } catch {
+    workplaces = [];
+  }
+
+  if (!Array.isArray(workplaces) || workplaces.length === 0) {
+    workplaces = await listWorkplaces();
+  }
+
   return workplaces
     .filter((item) => item.active !== false)
     .map((item) => ({

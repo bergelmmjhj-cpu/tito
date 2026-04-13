@@ -646,26 +646,24 @@ async function loadWorkplacesForAdmin() {
   setError(workplaceErrorEl, "");
 
   try {
+    // Load workers first so assignment table is always visible even if workplaces are unavailable.
+    const workersData = await apiFetch("/api/admin/workers");
+    const workers = workersData?.workers || [];
+
     const crmWorkplaces = await loadCrmWorkplaces();
 
     if (crmWorkplaces.length === 0) {
       setError(workplaceErrorEl, "CRM database unavailable or no workplaces found. Check CRM_DATABASE_URL configuration.");
       workplacesBodyEl.innerHTML = `<tr><td colspan="8" class="muted">CRM workplaces unavailable. Please check server configuration.</td></tr>`;
       assignWorkplaceSelectEl.innerHTML = '<option value="">Unassigned</option>';
+      renderAssignSelectors(workers, []);
+      renderWorkerAssignments(workers);
       return;
     }
 
     renderWorkplaces(crmWorkplaces);
-
-    // Load workers for assignment
-    const workersData = await apiFetch("/api/admin/workers");
-    const workers = workersData?.workers || [];
     renderAssignSelectors(workers, crmWorkplaces);
-
-    // Load current assignments
-    const assignmentsData = await apiFetch("/api/admin/workers/assignments");
-    const assignments = assignmentsData?.workers || [];
-    renderWorkerAssignments(assignments);
+    renderWorkerAssignments(workers);
   } catch (error) {
     setError(workplaceErrorEl, error.message);
   }
