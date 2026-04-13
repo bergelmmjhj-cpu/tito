@@ -219,7 +219,7 @@ export function migrateDatabase(db) {
     updatedAt: item.updatedAt || item.createdAt || new Date().toISOString(),
   }));
 
-  safe.shifts = safe.shifts.map((shift) => ({
+  safe.shifts = safe.shifts.map((shift) => {
     const normalizedShift = {
       ...shift,
       breaks: Array.isArray(shift.breaks) ? shift.breaks : [],

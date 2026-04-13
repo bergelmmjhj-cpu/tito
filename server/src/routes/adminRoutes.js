@@ -15,6 +15,7 @@ import {
   exportTimesheetsCsvController,
   getTimesheetDetailController,
   listTimesheetsController,
+  payrollSummaryController,
 } from "../controllers/adminTimesheetController.js";
 import {
   createAdminUserController,
@@ -49,6 +50,7 @@ export function createAdminRoutes() {
 
   // Timesheets — export must be registered before the :shiftId param route
   router.get("/timesheets/export/csv", exportTimesheetsCsvController);
+  router.get("/timesheets/summary/payroll", payrollSummaryController);
   router.get("/timesheets", listTimesheetsController);
   router.get("/timesheets/:shiftId", getTimesheetDetailController);
 

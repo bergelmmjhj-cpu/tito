@@ -147,6 +147,27 @@ function parseDate(value) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+async function getFilteredTimesheetRows(filters) {
+  const db = readDatabase();
+  const userIndex = await buildUserIndex();
+  const workplaceIndex = await buildWorkplaceIndex();
+  const logsByShift = buildLogsByShift(db.timeLogs || []);
+
+  const rows = (db.shifts || []).map((shift) =>
+    buildTimesheetRow(shift, userIndex[shift.userId] || null, logsByShift[shift.id] || [], workplaceIndex)
+  );
+
+  return rows.filter((row) => {
+    if (filters.workerId && row.workerId !== filters.workerId) return false;
+    if (filters.search && !matchesSearch(row, filters.search)) return false;
+    if (filters.workplaceId && row.workplaceId !== filters.workplaceId) return false;
+    if (filters.status && !matchesStatus(row, filters.status)) return false;
+    if (filters.dateFrom && (!row.date || row.date < filters.dateFrom)) return false;
+    if (filters.dateTo && (!row.date || row.date > filters.dateTo)) return false;
+    return true;
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -201,26 +222,7 @@ export function parseTimesheetFilters(query) {
  * Returns a paginated list of timesheet rows for all workers.
  */
 export async function listAdminTimesheets(filters) {
-  const db = readDatabase();
-  const userIndex = await buildUserIndex();
-  const workplaceIndex = await buildWorkplaceIndex();
-  const logsByShift = buildLogsByShift(db.timeLogs || []);
-
-  // Build all rows
-  const rows = (db.shifts || []).map((shift) =>
-    buildTimesheetRow(shift, userIndex[shift.userId] || null, logsByShift[shift.id] || [], workplaceIndex)
-  );
-
-  // Apply filters
-  const filtered = rows.filter((row) => {
-    if (filters.workerId && row.workerId !== filters.workerId) return false;
-    if (filters.search && !matchesSearch(row, filters.search)) return false;
-    if (filters.workplaceId && row.workplaceId !== filters.workplaceId) return false;
-    if (filters.status && !matchesStatus(row, filters.status)) return false;
-    if (filters.dateFrom && (!row.date || row.date < filters.dateFrom)) return false;
-    if (filters.dateTo && (!row.date || row.date > filters.dateTo)) return false;
-    return true;
-  });
+  const filtered = await getFilteredTimesheetRows(filters);
 
   // Sort newest first
   filtered.sort((a, b) => {
@@ -241,6 +243,36 @@ export async function listAdminTimesheets(filters) {
       page: filters.page,
       limit: filters.limit,
       totalPages,
+    },
+  };
+}
+
+export async function getAdminPayrollSummary(filters) {
+  const rows = await getFilteredTimesheetRows(filters);
+  const closedRows = rows.filter((row) => row.status === "completed");
+
+  const totalActualHours = Number(
+    closedRows.reduce((sum, row) => sum + (row.actualHours || 0), 0).toFixed(2)
+  );
+  const totalPayableHours = Number(
+    closedRows.reduce((sum, row) => sum + (row.payableHours || 0), 0).toFixed(2)
+  );
+
+  return {
+    dateFrom: filters.dateFrom,
+    dateTo: filters.dateTo,
+    filters: {
+      workerId: filters.workerId,
+      search: filters.search,
+      workplaceId: filters.workplaceId,
+      status: filters.status,
+    },
+    totals: {
+      shiftCount: rows.length,
+      completedShiftCount: closedRows.length,
+      totalActualHours,
+      totalPayableHours,
+      payableDeltaHours: Number((totalPayableHours - totalActualHours).toFixed(2)),
     },
   };
 }

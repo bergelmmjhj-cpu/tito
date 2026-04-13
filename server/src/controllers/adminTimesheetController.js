@@ -1,5 +1,6 @@
 import {
   buildTimesheetsCsv,
+  getAdminPayrollSummary,
   getAdminTimesheetDetail,
   listAdminTimesheets,
   parseTimesheetFilters,
@@ -36,6 +37,17 @@ export async function exportTimesheetsCsvController(req, res) {
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="timesheets-${date}.csv"`);
     res.send(csv);
+  } catch (error) {
+    const err = toHttpError(error);
+    res.status(err.status).json({ error: err.message });
+  }
+}
+
+export async function payrollSummaryController(req, res) {
+  try {
+    const filters = parseTimesheetFilters(req.query);
+    const summary = await getAdminPayrollSummary(filters);
+    res.json({ summary });
   } catch (error) {
     const err = toHttpError(error);
     res.status(err.status).json({ error: err.message });
