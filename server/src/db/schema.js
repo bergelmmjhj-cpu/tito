@@ -20,8 +20,10 @@ const CREATE_TABLES_SQL = `
     staff_id VARCHAR(50) NOT NULL UNIQUE,
     role VARCHAR(50) NOT NULL DEFAULT 'worker' CHECK (role IN ('worker', 'admin')),
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    password_salt TEXT NOT NULL,
-    password_hash TEXT NOT NULL,
+    google_id VARCHAR(255) UNIQUE,
+    google_email VARCHAR(255),
+    password_salt TEXT,
+    password_hash TEXT,
     profile JSONB DEFAULT '{}',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -31,6 +33,7 @@ const CREATE_TABLES_SQL = `
   CREATE INDEX IF NOT EXISTS idx_users_email ON users(LOWER(email));
   CREATE INDEX IF NOT EXISTS idx_users_staff_id ON users(LOWER(staff_id));
   CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+  CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id);
 
   -- Workplaces table
   CREATE TABLE IF NOT EXISTS workplaces (

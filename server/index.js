@@ -10,6 +10,7 @@ import {
 } from "./src/db/initialization.js";
 import { initializeCrmPool, isCrmPoolReady } from "./src/db/crmPool.js";
 import { ensureBootstrapAdminExists } from "./src/services/adminBootstrapService.js";
+import { initializeGoogleAuth } from "./src/services/googleAuthService.js";
 import { createAuthRouter } from "./src/routes/authRoutes.js";
 import { createTimeRoutes } from "./src/routes/timeRoutes.js";
 import { createLegacyRoutes } from "./src/routes/legacyRoutes.js";
@@ -41,6 +42,13 @@ async function startServer() {
       console.log(`[startup] crm_database_initialized=${isCrmPoolReady()}`);
     } catch (error) {
       console.warn(`[startup] crm_database_initialization_failed: ${error.message}`);
+    }
+
+    try {
+      initializeGoogleAuth();
+      console.log(`[startup] google_oauth=enabled`);
+    } catch (error) {
+      console.warn(`[startup] google_oauth=disabled reason=${error.message}`);
     }
 
     try {
