@@ -92,10 +92,16 @@ export async function getAllShiftsForUser(userId) {
 
   return Promise.all(
     result.rows.map(async (shift) => {
-      const breaksResult = await query(`SELECT * FROM breaks WHERE shift_id = $1 ORDER BY start_at`, [
-        shift.id,
-      ]);
-      return normalizeDbShift(shift, breaksResult.rows);
+      try {
+        const breaksResult = await query(`SELECT * FROM breaks WHERE shift_id = $1 ORDER BY start_at`, [
+          shift.id,
+        ]);
+        return normalizeDbShift(shift, breaksResult.rows);
+      } catch (breaksError) {
+        console.error(`[getAllShiftsForUser] Failed to load breaks for shift ${shift.id}:`, breaksError.message);
+        // Fallback: return shift without breaks rather than failing entire operation
+        return normalizeDbShift(shift, []);
+      }
     })
   );
 }
@@ -114,10 +120,16 @@ export async function getOpenShiftForUser(userId) {
   if (result.rows.length === 0) return null;
 
   const shift = result.rows[0];
-  const breaksResult = await query(`SELECT * FROM breaks WHERE shift_id = $1 ORDER BY start_at`, [
-    shift.id,
-  ]);
-  return normalizeDbShift(shift, breaksResult.rows);
+  try {
+    const breaksResult = await query(`SELECT * FROM breaks WHERE shift_id = $1 ORDER BY start_at`, [
+      shift.id,
+    ]);
+    return normalizeDbShift(shift, breaksResult.rows);
+  } catch (breaksError) {
+    console.error(`[getOpenShiftForUser] Failed to load breaks for shift ${shift.id}:`, breaksError.message);
+    // Fallback: return shift without breaks rather than failing
+    return normalizeDbShift(shift, []);
+  }
 }
 
 export async function getTimeLogsForUser(userId) {

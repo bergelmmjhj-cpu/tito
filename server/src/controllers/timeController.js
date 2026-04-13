@@ -11,6 +11,12 @@ export async function statusController(req, res) {
     const data = await getCurrentStatus(req.user.id);
     res.json({ user: req.user, ...data });
   } catch (error) {
+    console.error("[time.status] failed", {
+      userId: req.user?.id || null,
+      message: error?.message || "unknown_error",
+      name: error?.name || "Error",
+      stack: error?.stack || "no_stack",
+    });
     const err = toHttpError(error);
     res.status(err.status).json({ error: err.message });
   }
@@ -30,6 +36,7 @@ export async function actionController(req, res) {
       actionType: req.body?.actionType || null,
       message: error?.message || "unknown_error",
       name: error?.name || "Error",
+      stack: error?.stack || "no_stack",
     });
     const err = toHttpError(error);
     res.status(err.status).json({ error: err.message });
@@ -41,6 +48,12 @@ export async function historyController(req, res) {
     const history = await getAttendanceActionHistory(req.user.id);
     res.json({ user: req.user, history });
   } catch (error) {
+    console.error("[time.history] failed", {
+      userId: req.user?.id || null,
+      message: error?.message || "unknown_error",
+      name: error?.name || "Error",
+      stack: error?.stack || "no_stack",
+    });
     const err = toHttpError(error);
     res.status(err.status).json({ error: err.message });
   }
@@ -51,6 +64,12 @@ export async function shiftHistoryController(req, res) {
     const shifts = await getAttendanceHistory(req.user.id);
     res.json({ user: req.user, shifts });
   } catch (error) {
+    console.error("[time.shiftHistory] failed", {
+      userId: req.user?.id || null,
+      message: error?.message || "unknown_error",
+      name: error?.name || "Error",
+      stack: error?.stack || "no_stack",
+    });
     const err = toHttpError(error);
     res.status(err.status).json({ error: err.message });
   }
