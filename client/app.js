@@ -19,6 +19,7 @@ const signupPasswordEl = document.getElementById("signupPassword");
 const signupConfirmPasswordEl = document.getElementById("signupConfirmPassword");
 const signupBtnEl = document.getElementById("signupBtn");
 const signupErrorEl = document.getElementById("signupError");
+const googleLoginBtnEl = document.getElementById("googleLoginBtn");
 
 const workerNameEl = document.getElementById("workerName");
 const liveClockEl = document.getElementById("liveClock");
@@ -898,6 +899,55 @@ async function signup() {
   await refreshLocationSilently();
 }
 
+async function googleLogin() {
+  setError(loginErrorEl, "");
+  try {
+    const data = await apiFetch("/api/auth/google/url");
+    if (!data?.url) throw new Error("Failed to get Google authorization URL");
+    window.location.href = data.url;
+  } catch (error) {
+    setError(loginErrorEl, error.message);
+  }
+}
+
+async function handleGoogleOAuthCallback() {
+  const params = new URLSearchParams(window.location.search);
+  const idToken = params.get("id_token");
+  const code = params.get("code");
+
+  // Only handle if we have an id_token directly (some flows pass it in the URL)
+  if (!idToken && !code) return;
+
+  // Clean the URL so the params don't persist on refresh
+  const cleanUrl = window.location.pathname;
+  window.history.replaceState({}, document.title, cleanUrl);
+
+  if (!idToken) {
+    // Authorization code flow — the backend handles code exchange server-side.
+    // In this implementation the frontend sends the id_token after Google redirects back.
+    // If only a code is present, show an informational error.
+    setError(loginErrorEl, "Google sign-in requires an ID token. Please try again.");
+    return;
+  }
+
+  setError(loginErrorEl, "");
+  try {
+    const data = await apiFetch("/api/auth/google/callback", {
+      method: "POST",
+      body: JSON.stringify({ idToken }),
+    });
+
+    authToken = data.token;
+    localStorage.setItem(TOKEN_KEY, authToken);
+    setLoggedInState();
+    renderLocationState("unavailable");
+    await Promise.all([loadStatus(), loadHistory()]);
+    await refreshLocationSilently();
+  } catch (error) {
+    setError(loginErrorEl, error.message);
+  }
+}
+
 async function handleWorkplaceFormSubmit(event) {
   event.preventDefault();
   setError(workplaceErrorEl, "Workplaces are managed in the CRM system. Edit them there and refresh this page.");
@@ -967,6 +1017,9 @@ adminLoginBtnEl.addEventListener("click", () => {
 });
 signupBtnEl.addEventListener("click", () => {
   signup().catch((error) => setError(signupErrorEl, error.message));
+});
+googleLoginBtnEl.addEventListener("click", () => {
+  googleLogin().catch((error) => setError(loginErrorEl, error.message));
 });
 
 logoutBtnEl.addEventListener("click", () => setLoggedOutState());
@@ -1367,6 +1420,7 @@ closeTimesheetDetailBtnEl.addEventListener("click", () => {
 startLiveClock();
 resetWorkplaceForm();
 showMapPlaceholder("Location not captured yet.", "Waiting for location");
+handleGoogleOAuthCallback().catch((error) => setError(loginErrorEl, error.message));
 initFromSession();
 
 window.addEventListener("beforeunload", () => {

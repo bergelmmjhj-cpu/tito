@@ -58,6 +58,9 @@ export async function initializeDatabase() {
       await setSchemaVersion(1);
     }
 
+    // Apply incremental schema migrations for existing databases
+    await applySchemaAlterations();
+
     isInitialized = true;
     lastInitializationError = null;
     console.log("Database initialization complete");
@@ -66,6 +69,29 @@ export async function initializeDatabase() {
     schemaInitialized = false;
     console.error("Database initialization failed:", error.message);
     throw error;
+  }
+}
+
+async function applySchemaAlterations() {
+  // Add google_id and google_email columns if they don't exist (for existing databases)
+  const alterations = [
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id VARCHAR(255) UNIQUE`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS google_email VARCHAR(255)`,
+    `CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id)`,
+    // Allow password_salt and password_hash to be nullable for OAuth-only users
+    `ALTER TABLE users ALTER COLUMN password_salt DROP NOT NULL`,
+    `ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL`,
+  ];
+
+  for (const sql of alterations) {
+    try {
+      await withClient(async (client) => {
+        await client.query(sql);
+      });
+    } catch (error) {
+      // Log but don't fail — some alterations may not apply in all environments
+      console.warn(`[schema-migration] Alteration skipped: ${error.message}`);
+    }
   }
 }
 
