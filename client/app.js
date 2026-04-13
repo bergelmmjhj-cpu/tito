@@ -477,6 +477,62 @@ async function loadAdminUsers() {
   renderAdminUsers(data?.users || []);
 }
 
+// CRM Workplaces (shared from CRM database)
+async function loadCrmWorkplaces() {
+  try {
+    const data = await apiFetch("/api/crm/workplaces");
+    return data?.workplaces || [];
+  } catch (error) {
+    console.error("Failed to load CRM workplaces:", error.message);
+    // Return empty array on error, UI will show message
+    return [];
+  }
+}
+
+async function loadWorkplacesForAdmin() {
+  if (currentUser?.role !== "admin") return;
+
+  setError(workplaceErrorEl, "");
+
+  try {
+    const crmWorkplaces = await loadCrmWorkplaces();
+
+    if (crmWorkplaces.length === 0) {
+      setError(workplaceErrorEl, "CRM database unavailable or no workplaces found. Check CRM_DATABASE_URL configuration.");
+      workplacesBodyEl.innerHTML = `<tr><td colspan="8" class="muted">CRM workplaces unavailable. Please check server configuration.</td></tr>`;
+      assignWorkplaceSelectEl.innerHTML = '<option value="">Unassigned</option>';
+      return;
+    }
+
+    renderWorkplaces(crmWorkplaces);
+
+    // Load workers for assignment
+    const workersData = await apiFetch("/api/admin/workers");
+    const workers = workersData?.workers || [];
+    renderAssignSelectors(workers, crmWorkplaces);
+
+    // Load current assignments
+    const assignmentsData = await apiFetch("/api/admin/workers/assignments");
+    const assignments = assignmentsData?.workers || [];
+    renderWorkerAssignments(assignments);
+  } catch (error) {
+    setError(workplaceErrorEl, error.message);
+  }
+}
+
+function showCrmUnavailableMessage() {
+  workplaceErrorEl.classList.remove("hidden");
+  workplaceErrorEl.textContent = "CRM database is unavailable. Please check that CRM_DATABASE_URL is configured on the server.";
+  workplacesBodyEl.innerHTML = `<tr><td colspan="8" class="muted">CRM workplaces unavailable. Contact administrator.</td></tr>`;
+  assignWorkplaceSelectEl.innerHTML = '<option value="">Unassigned</option>';
+
+  // Disable form
+  workplaceFormEl.style.opacity = "0.5";
+  workplaceFormEl.style.pointerEvents = "none";
+  saveWorkplaceBtnEl.disabled = true;
+  resetWorkplaceBtnEl.disabled = true;
+}
+
 async function createManagedUser(event) {
   event.preventDefault();
   setError(adminUserErrorEl, "");
@@ -842,31 +898,9 @@ async function signup() {
   await refreshLocationSilently();
 }
 
-async function saveWorkplace(event) {
+async function handleWorkplaceFormSubmit(event) {
   event.preventDefault();
-  setError(workplaceErrorEl, "");
-
-  try {
-    const payload = toWorkplacePayload();
-    const workplaceId = workplaceIdEl.value.trim();
-
-    if (workplaceId) {
-      await apiFetch(`/api/workplaces/${workplaceId}`, {
-        method: "PUT",
-        body: JSON.stringify(payload),
-      });
-    } else {
-      await apiFetch("/api/workplaces", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-    }
-
-    resetWorkplaceForm();
-    await Promise.all([loadWorkplaces(), loadWorkerAssignments()]);
-  } catch (error) {
-    setError(workplaceErrorEl, error.message);
-  }
+  setError(workplaceErrorEl, "Workplaces are managed in the CRM system. Edit them there and refresh this page.");
 }
 
 async function saveWorkerAssignment() {
@@ -891,46 +925,11 @@ async function saveWorkerAssignment() {
   }
 }
 
-async function handleWorkplaceTableClick(event) {
+function handleWorkplaceTableClick(event) {
   const button = event.target.closest("button[data-action]");
   if (!button) return;
 
-  const workplaceId = button.dataset.id;
-  const action = button.dataset.action;
-
-  try {
-    if (action === "toggle") {
-      const currentlyActive = button.dataset.active === "true";
-      await apiFetch(`/api/workplaces/${workplaceId}/status`, {
-        method: "PATCH",
-        body: JSON.stringify({ active: !currentlyActive }),
-      });
-      await loadWorkplaces();
-      return;
-    }
-
-    if (action === "edit") {
-      const data = await apiFetch(`/api/workplaces/${workplaceId}`);
-      const wp = data.workplace;
-      workplaceIdEl.value = wp.id;
-      wpNameEl.value = wp.name || "";
-      wpAddressEl.value = wp.address || "";
-      wpCityEl.value = wp.city || "";
-      wpStateEl.value = wp.state || "";
-      wpPostalCodeEl.value = wp.postalCode || "";
-      wpCountryEl.value = wp.country || "";
-      wpContactNameEl.value = wp.contactName || "";
-      wpContactPhoneEl.value = wp.contactPhone || "";
-      wpContactEmailEl.value = wp.contactEmail || "";
-      wpLatitudeEl.value = wp.latitude;
-      wpLongitudeEl.value = wp.longitude;
-      wpRadiusEl.value = wp.geofenceRadiusMeters;
-      wpActiveEl.checked = wp.active !== false;
-      saveWorkplaceBtnEl.textContent = "Update Workplace";
-    }
-  } catch (error) {
-    setError(workplaceErrorEl, error.message);
-  }
+  setError(workplaceErrorEl, "CRM workplaces are read-only. Edit them in the CRM system.");
 }
 
 async function initFromSession() {
@@ -976,7 +975,7 @@ showTimeClockBtnEl.addEventListener("click", () => openScreen("time"));
 showWorkplacesBtnEl.addEventListener("click", () => {
   openScreen("workplaces");
   requireAdminAccessForScreen(workplaceErrorEl)
-    .then(() => Promise.all([loadWorkplaces(), loadWorkerAssignments()]))
+    .then(() => loadWorkplacesForAdmin())
     .catch((error) => setError(workplaceErrorEl, error.message));
 });
 showUsersBtnEl.addEventListener("click", () => {
@@ -1013,7 +1012,7 @@ refreshLocationBtnEl.addEventListener("click", () => {
 });
 
 refreshWorkplacesBtnEl.addEventListener("click", () => {
-  Promise.all([loadWorkplaces(), loadWorkerAssignments()]).catch((error) =>
+  loadWorkplacesForAdmin().catch((error) =>
     setError(workplaceErrorEl, error.message)
   );
 });
@@ -1028,7 +1027,7 @@ saveAssignmentBtnEl.addEventListener("click", () => {
   saveWorkerAssignment();
 });
 
-workplaceFormEl.addEventListener("submit", saveWorkplace);
+workplaceFormEl.addEventListener("submit", handleWorkplaceFormSubmit);
 resetWorkplaceBtnEl.addEventListener("click", () => {
   resetWorkplaceForm();
   setError(workplaceErrorEl, "");
