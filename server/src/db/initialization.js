@@ -73,12 +73,18 @@ export async function initializeDatabase() {
 }
 
 async function applySchemaAlterations() {
-  // Add google_id and google_email columns if they don't exist (for existing databases)
+  // Add google_id and google_email columns if they don't exist (for existing databases
+  // that were created before these columns were added to the CREATE TABLE statement).
+  // Each alteration is wrapped in its own try/catch so a single failure never blocks startup.
+  //
+  // NOTE: password_salt and password_hash are already defined as nullable in the
+  // CREATE TABLE statement in schema.js, so no DROP NOT NULL migration is needed.
+  // For pre-existing databases that had NOT NULL on those columns, the ALTER TABLE
+  // below will handle it safely via the per-statement catch block.
   const alterations = [
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id VARCHAR(255) UNIQUE`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS google_email VARCHAR(255)`,
     `CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id)`,
-    // Allow password_salt and password_hash to be nullable for OAuth-only users
     `ALTER TABLE users ALTER COLUMN password_salt DROP NOT NULL`,
     `ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL`,
   ];
