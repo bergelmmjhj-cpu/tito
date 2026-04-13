@@ -1227,15 +1227,21 @@ async function initFromSession() {
   }
 
   try {
-    await Promise.all([loadStatus(), loadHistory()]);
+    await loadStatus();
     setLoggedInState();
+
+    // Keep session active even if history endpoint is temporarily unavailable.
+    loadHistory().catch((error) => {
+      console.warn("Failed to load shift history during session restore:", error.message);
+    });
+
     if (currentUser?.role !== "admin") {
       openScreen("time");
       await requestLocationForTimeClock("session_restore");
     }
   } catch (error) {
       setLoggedOutState();
-      setError(loginErrorEl, "Session could not be restored. Please sign in again.");
+    setError(loginErrorEl, `Session could not be restored: ${error.message}`);
   }
 }
 
