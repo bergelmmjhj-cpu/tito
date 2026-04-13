@@ -1105,6 +1105,11 @@ async function loadStatus() {
 
 async function loadHistory() {
   const data = await apiFetch("/api/time/shifts");
+  console.info("[history] response", {
+    userId: data?.user?.id || null,
+    rowCount: Array.isArray(data?.shifts) ? data.shifts.length : 0,
+    payload: data,
+  });
   renderHistory(data?.shifts || []);
 }
 

@@ -5,8 +5,19 @@ import { nowIso } from "../utils/time.js";
 import { isDatabaseReady, readDatabaseFromJson, writeDatabaseToJson } from "../db/initialization.js";
 
 function toNumberOrNull(value) {
+  if (value === null || value === undefined || value === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeTimestamp(value) {
+  if (!value) return null;
+  if (typeof value === "string") return value;
+  if (value instanceof Date) return value.toISOString();
+
+  const parsed = Date.parse(String(value));
+  if (Number.isNaN(parsed)) return null;
+  return new Date(parsed).toISOString();
 }
 
 function normalizeLocation(location) {
@@ -43,25 +54,25 @@ function normalizeGeofence(geofence) {
 function normalizeDbShift(dbShift, breaks = []) {
   const normalizedBreaks = breaks.map((b) => ({
     id: b.id,
-    startAt: b.start_at,
-    endAt: b.end_at,
+    startAt: normalizeTimestamp(b.start_at),
+    endAt: normalizeTimestamp(b.end_at),
   }));
   const summary = buildShiftHourSummary({
-    clockInAt: dbShift.clock_in_at,
-    clockOutAt: dbShift.clock_out_at,
+    clockInAt: normalizeTimestamp(dbShift.clock_in_at),
+    clockOutAt: normalizeTimestamp(dbShift.clock_out_at),
     breaks: normalizedBreaks,
   });
 
   return {
     id: dbShift.id,
     userId: dbShift.user_id,
-    clockInAt: dbShift.clock_in_at,
-    clockOutAt: dbShift.clock_out_at,
+    clockInAt: normalizeTimestamp(dbShift.clock_in_at),
+    clockOutAt: normalizeTimestamp(dbShift.clock_out_at),
     actualHours: toNumberOrNull(dbShift.actual_hours) ?? summary.actualHours,
     payableHours: toNumberOrNull(dbShift.payable_hours) ?? summary.payableHours,
     breaks: normalizedBreaks,
-    createdAt: dbShift.created_at,
-    updatedAt: dbShift.updated_at,
+    createdAt: normalizeTimestamp(dbShift.created_at),
+    updatedAt: normalizeTimestamp(dbShift.updated_at),
   };
 }
 
@@ -82,11 +93,11 @@ function normalizeDbTimeLog(dbLog) {
     userId: dbLog.user_id,
     shiftId: dbLog.shift_id,
     actionType: dbLog.action_type,
-    timestamp: dbLog.timestamp,
+    timestamp: normalizeTimestamp(dbLog.timestamp),
     location: safeJsonParse(dbLog.location, "location"),
     geofence: safeJsonParse(dbLog.geofence, "geofence"),
     notes: dbLog.notes,
-    createdAt: dbLog.created_at,
+    createdAt: normalizeTimestamp(dbLog.created_at),
   };
 }
 
@@ -100,6 +111,11 @@ export async function getAllShiftsForUser(userId) {
     `SELECT s.* FROM shifts s WHERE s.user_id = $1 ORDER BY s.clock_in_at DESC`,
     [userId]
   );
+
+  console.info("[timeLogModel.getAllShiftsForUser] fetched shifts", {
+    userId,
+    rowCount: result.rows.length,
+  });
 
   return Promise.all(
     result.rows.map(async (shift) => {
@@ -153,6 +169,12 @@ export async function getTimeLogsForUser(userId) {
     `SELECT * FROM time_logs WHERE user_id = $1 ORDER BY timestamp DESC`,
     [userId]
   );
+
+  console.info("[timeLogModel.getTimeLogsForUser] fetched logs", {
+    userId,
+    rowCount: result.rows.length,
+  });
+
   return result.rows.map(normalizeDbTimeLog);
 }
 
@@ -219,6 +241,12 @@ export async function saveClockIn(userId, notes = null, location = null, geofenc
       );
 
       await client.query("COMMIT");
+
+      console.info("[timeLogModel.saveClockIn] wrote shift and log", {
+        userId,
+        shiftId,
+        logId,
+      });
 
       return {
         id: shiftId,
@@ -307,6 +335,13 @@ export async function saveStartBreak(userId, notes = null, location = null, geof
 
       await client.query("COMMIT");
 
+      console.info("[timeLogModel.saveStartBreak] wrote break and log", {
+        userId,
+        shiftId,
+        breakId,
+        logId,
+      });
+
       const shiftData = await client.query(`SELECT * FROM shifts WHERE id = $1`, [shiftId]);
       const breaksData = await client.query(`SELECT * FROM breaks WHERE shift_id = $1 ORDER BY start_at`, [
         shiftId,
@@ -392,6 +427,13 @@ export async function saveEndBreak(userId, notes = null, location = null, geofen
       );
 
       await client.query("COMMIT");
+
+      console.info("[timeLogModel.saveEndBreak] closed break and wrote log", {
+        userId,
+        shiftId,
+        breakId,
+        logId,
+      });
 
       const shiftData = await client.query(`SELECT * FROM shifts WHERE id = $1`, [shiftId]);
       const breaksData = await client.query(`SELECT * FROM breaks WHERE shift_id = $1 ORDER BY start_at`, [
@@ -482,6 +524,12 @@ export async function saveClockOut(userId, notes = null, location = null, geofen
       );
 
       await client.query("COMMIT");
+
+      console.info("[timeLogModel.saveClockOut] closed shift and wrote log", {
+        userId,
+        shiftId,
+        logId,
+      });
 
       return {
         ...normalizedShift,

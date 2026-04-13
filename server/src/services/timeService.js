@@ -434,6 +434,12 @@ export async function getAttendanceHistory(userId) {
     .slice()
     .sort((a, b) => Date.parse(b.clockInAt || "") - Date.parse(a.clockInAt || ""));
 
+  console.info("[time.getAttendanceHistory] aggregating shifts", {
+    userId,
+    shiftCount: shifts.length,
+    logCount: logs.length,
+  });
+
   return sorted.map((shift) => {
     const shiftLogs = logsByShift.get(shift.id) || [];
     const clockInLog = firstLogOfType(shiftLogs, "clock_in");
@@ -444,7 +450,7 @@ export async function getAttendanceHistory(userId) {
 
     return {
       shiftId: shift.id,
-      date: shift.clockInAt ? shift.clockInAt.slice(0, 10) : null,
+      date: shift.clockInAt ? new Date(shift.clockInAt).toISOString().slice(0, 10) : null,
       status: deriveShiftStatus(shift),
       timeIn: shift.clockInAt || null,
       breakStart,

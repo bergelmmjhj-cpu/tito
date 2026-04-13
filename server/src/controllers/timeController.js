@@ -52,6 +52,10 @@ export async function actionController(req, res) {
 export async function historyController(req, res) {
   try {
     const history = await getAttendanceActionHistory(req.user.id);
+    console.info("[time.history] success", {
+      userId: req.user?.id || null,
+      rowCount: history.length,
+    });
     res.json({ user: req.user, history });
   } catch (error) {
     console.error("[time.history] failed", {
@@ -68,6 +72,11 @@ export async function historyController(req, res) {
 export async function shiftHistoryController(req, res) {
   try {
     const shifts = await getAttendanceHistory(req.user.id);
+    console.info("[time.shiftHistory] success", {
+      userId: req.user?.id || null,
+      rowCount: shifts.length,
+      shiftIds: shifts.slice(0, 5).map((shift) => shift.shiftId),
+    });
     res.json({ user: req.user, shifts });
   } catch (error) {
     console.error("[time.shiftHistory] failed", {
