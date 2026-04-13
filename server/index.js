@@ -75,6 +75,9 @@ async function startServer() {
       console.error(`Bootstrap admin setup failed: ${error.message}`);
     }
 
+    // Trust proxy headers from Railway
+    app.set('trust proxy', 1);
+
     app.use(cors());
     app.use(express.json());
     app.use(express.static(join(__dirname, "../client")));
