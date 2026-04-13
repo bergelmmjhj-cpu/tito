@@ -40,6 +40,10 @@ async function startServer() {
         console.log(`[startup] bootstrap_admin=created email=${result.admin.email}`);
       } else if (result.reason === "password_synced") {
         console.log(`[startup] bootstrap_admin=password_synced email=${result.admin.email}`);
+      } else if (result.reason === "identifier_synced") {
+        console.log(`[startup] bootstrap_admin=identifier_synced email=${result.admin.email}`);
+      } else if (result.reason === "promoted_existing_user") {
+        console.log(`[startup] bootstrap_admin=promoted_existing_user email=${result.admin.email}`);
       } else if (result.reason === "placeholder_replaced") {
         console.log(`[startup] bootstrap_admin=placeholder_replaced new_email=${result.admin.email}`);
       } else {
