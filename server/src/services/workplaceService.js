@@ -5,6 +5,10 @@ import {
   listWorkplaces,
   updateWorkplace,
 } from "../models/workplaceModel.js";
+import {
+  findWorkplaceByIdFromCrm,
+  listWorkplacesFromCrm,
+} from "../models/crmWorkplaceModel.js";
 import { HttpError } from "../utils/errors.js";
 
 function normalizeText(value, label, required = false, maxLen = 120) {
@@ -109,6 +113,8 @@ function sortByUpdatedDesc(items) {
     .sort((a, b) => Date.parse(b.updatedAt || "") - Date.parse(a.updatedAt || ""));
 }
 
+// --- Tito DB functions (DATABASE_URL) ---
+
 export async function getWorkplaces(includeInactive = true) {
   const all = await listWorkplaces();
   const filtered = includeInactive ? all : all.filter((item) => item.active !== false);
@@ -165,5 +171,19 @@ export async function setWorkplaceActive(workplaceId, active) {
 export async function getWorkplaceById(workplaceId) {
   const workplace = await findWorkplaceById(workplaceId);
   if (!workplace) throw new HttpError(404, "Workplace not found");
+  return workplace;
+}
+
+// --- CRM DB functions (CRM_DATABASE_URL) ---
+
+export async function getWorkplacesFromCrm(includeInactive = true) {
+  const all = await listWorkplacesFromCrm();
+  const filtered = includeInactive ? all : all.filter((item) => item.active !== false);
+  return sortByUpdatedDesc(filtered);
+}
+
+export async function getWorkplaceByIdFromCrm(workplaceId) {
+  const workplace = await findWorkplaceByIdFromCrm(workplaceId);
+  if (!workplace) throw new HttpError(404, "Workplace not found in CRM");
   return workplace;
 }
