@@ -83,9 +83,19 @@ function buildTimesheetRow(shift, user, shiftLogs, workplaceIndex) {
     clockInLocation.accuracy > LOW_ACCURACY_THRESHOLD_METERS;
 
   const geofence = clockInLog?.geofence || null;
+  const resolvedWorkplaceId = geofence?.resolvedWorkplaceId || null;
+  const resolvedWorkplaceName = geofence?.resolvedWorkplaceName || null;
+  const workplaceResolution = geofence?.workplaceResolution || "unresolved";
+  const assignedWorkplaceUsed = Boolean(geofence?.assignedWorkplaceUsed);
+  const geofenceMatched = typeof geofence?.geofenceMatched === "boolean" ? geofence.geofenceMatched : null;
+  const outsideGeofence = geofence?.reviewFlag === "outside_geofence";
+  const unresolvedWorkplace = workplaceResolution === "unresolved";
+  const reviewFlag = geofence?.reviewFlag || (unresolvedWorkplace ? "workplace_unresolved" : null);
+
   const workplaceId =
-    geofence?.workplaceId || user?.profile?.assignedWorkplaceId || null;
+    resolvedWorkplaceId || geofence?.workplaceId || user?.profile?.assignedWorkplaceId || null;
   const workplaceName =
+    resolvedWorkplaceName ||
     geofence?.workplaceName ||
     (workplaceId ? workplaceIndex[workplaceId]?.name || null : null);
 
@@ -111,7 +121,13 @@ function buildTimesheetRow(shift, user, shiftLogs, workplaceIndex) {
     totalMinutes: summary.workedMinutes,
     breakMinutes: summary.breakMinutes,
     workplaceId: workplaceId || null,
-    workplaceName: workplaceName || null,
+    workplaceName: workplaceName || (unresolvedWorkplace ? "Workplace unresolved" : null),
+    workplaceResolution,
+    assignedWorkplaceUsed,
+    geofenceMatched,
+    outsideGeofence,
+    unresolvedWorkplace,
+    reviewFlag,
     distanceMeters: typeof geofence?.distanceMeters === "number" ? geofence.distanceMeters : null,
     withinGeofence: typeof geofence?.withinGeofence === "boolean" ? geofence.withinGeofence : null,
     locationSummary:
@@ -148,6 +164,8 @@ function matchesStatus(row, status) {
   if (!status) return true;
   if (status === "no_location") return row.noLocation;
   if (status === "low_accuracy") return row.lowAccuracy;
+  if (status === "outside_geofence") return row.outsideGeofence;
+  if (status === "workplace_unresolved") return row.unresolvedWorkplace;
   return row.status === status;
 }
 
@@ -215,6 +233,8 @@ export function parseTimesheetFilters(query) {
     "missing_break_end",
     "no_location",
     "low_accuracy",
+    "outside_geofence",
+    "workplace_unresolved",
     "",
   ]);
   const cleanStatus = typeof status === "string" && allowedStatuses.has(status) ? status : "";
@@ -369,6 +389,10 @@ const CSV_COLUMNS = [
   { header: "Actual Hours", key: "actualHours" },
   { header: "Payable Hours", key: "payableHours" },
   { header: "Workplace", key: "workplaceName" },
+  { header: "Workplace Resolution", key: "workplaceResolution" },
+  { header: "Assigned Workplace Used", key: "assignedWorkplaceUsed" },
+  { header: "Geofence Matched", key: "geofenceMatched" },
+  { header: "Review Flag", key: "reviewFlag" },
   { header: "Distance (m)", key: "distanceMeters" },
   { header: "Within Geofence", key: "withinGeofence" },
   { header: "Location Summary", key: "locationSummary" },

@@ -18,14 +18,21 @@ export async function findWorkplaceByIdFromCrm(workplaceId) {
 function normalizeDbWorkplace(dbRow) {
   if (!dbRow) return null;
 
+  const pickFirst = (...values) => {
+    for (const value of values) {
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+    return "";
+  };
+
   return {
     id: dbRow.id,
     name: dbRow.name,
-    address: dbRow.address || "",
-    city: dbRow.city || "",
-    state: dbRow.state || "",
+    address: pickFirst(dbRow.address, dbRow.street, dbRow.address_line_1, dbRow.full_address),
+    city: pickFirst(dbRow.city, dbRow.city_name, dbRow.town),
+    state: pickFirst(dbRow.state, dbRow.province, dbRow.region, dbRow.state_name),
     postalCode: dbRow.postal_code || "",
-    country: dbRow.country || "",
+    country: pickFirst(dbRow.country, dbRow.country_name, dbRow.country_code),
     contactName: dbRow.contact_name || null,
     contactPhone: dbRow.contact_phone || null,
     contactEmail: dbRow.contact_email || null,

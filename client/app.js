@@ -24,6 +24,7 @@ const signupErrorEl = document.getElementById("signupError");
 const workerNameEl = document.getElementById("workerName");
 const liveClockEl = document.getElementById("liveClock");
 const statusBadgeEl = document.getElementById("statusBadge");
+const workerStatusTextEl = document.getElementById("workerStatusText");
 const assignedWorkplaceInfoEl = document.getElementById("assignedWorkplaceInfo");
 const geofenceInfoEl = document.getElementById("geofenceInfo");
 const actionErrorEl = document.getElementById("actionError");
@@ -114,6 +115,7 @@ let lastLocationIssue = "";
 let lastLocationCheckAt = null;
 let actionInProgress = null;
 let actionUiResetTimer = null;
+let latestGeofenceEvaluation = null;
 
 const ACTION_BUTTONS = {
   clock_in: clockInBtnEl,
@@ -523,11 +525,63 @@ function renderStatus(status) {
   currentStatus = status || "not_clocked_in";
   statusBadgeEl.textContent = toStatusLabel(currentStatus);
 
+  const setWorkerStatusText = () => {
+    if (!workerStatusTextEl) return;
+    if (latestGeofenceEvaluation?.reviewFlag === "outside_geofence") {
+      workerStatusTextEl.textContent = "Outside assigned workplace area. Action was saved and flagged for admin review.";
+      return;
+    }
+    if (latestGeofenceEvaluation?.workplaceResolution === "unresolved") {
+      workerStatusTextEl.textContent = "No workplace assigned; contact admin.";
+      return;
+    }
+    if (currentStatus === "on_break") {
+      workerStatusTextEl.textContent = "You are on break. End break when you return to work.";
+      return;
+    }
+    if (currentStatus === "clocked_in") {
+      workerStatusTextEl.textContent = "You are currently clocked in.";
+      return;
+    }
+    if (currentStatus === "clocked_out") {
+      workerStatusTextEl.textContent = "Shift completed. Clock in when your next shift starts.";
+      return;
+    }
+
+    const noAssigned = !currentUser?.assignedWorkplaceId;
+    if (noAssigned) {
+      workerStatusTextEl.textContent = "Ready to clock in. No workplace assigned; contact admin if needed.";
+      return;
+    }
+    workerStatusTextEl.textContent = "Ready to clock in.";
+  };
+
+  const setVisibleActions = () => {
+    const show = {
+      clock_in: currentStatus === "not_clocked_in" || currentStatus === "clocked_out",
+      break_start: currentStatus === "clocked_in",
+      break_end: currentStatus === "on_break",
+      clock_out: currentStatus === "clocked_in",
+    };
+
+    for (const [actionType, button] of Object.entries(ACTION_BUTTONS)) {
+      if (!button) continue;
+      button.classList.toggle("hidden", !show[actionType]);
+      button.classList.toggle("primary-action", show[actionType]);
+    }
+
+    // When clocked in, keep Clock Out visible but de-emphasized.
+    clockOutBtnEl.classList.toggle("primary-action", false);
+    clockOutBtnEl.classList.toggle("ghost", currentStatus === "clocked_in");
+  };
+
   if (actionInProgress) {
     clockInBtnEl.disabled = true;
     startBreakBtnEl.disabled = true;
     endBreakBtnEl.disabled = true;
     clockOutBtnEl.disabled = true;
+    setVisibleActions();
+    setWorkerStatusText();
     renderLocationActionHint();
     return;
   }
@@ -537,6 +591,8 @@ function renderStatus(status) {
   startBreakBtnEl.disabled = currentStatus !== "clocked_in";
   endBreakBtnEl.disabled = currentStatus !== "on_break";
   clockOutBtnEl.disabled = currentStatus !== "clocked_in";
+  setVisibleActions();
+  setWorkerStatusText();
   renderLocationActionHint();
 }
 
@@ -556,13 +612,20 @@ function renderAssignedWorkplaceInfo(assignment) {
 }
 
 function renderGeofenceInfo(geofenceEvaluation) {
+  latestGeofenceEvaluation = geofenceEvaluation || null;
+
   if (!geofenceEvaluation) {
     geofenceInfoEl.textContent = "Distance check: not evaluated yet";
     return;
   }
 
   if (!geofenceEvaluation.assignmentRequired) {
-    geofenceInfoEl.textContent = "Distance check: no assigned workplace";
+    if (geofenceEvaluation.workplaceResolution === "nearest" && geofenceEvaluation.workplaceName) {
+      geofenceInfoEl.textContent = `No assigned workplace. Linked to nearest workplace: ${geofenceEvaluation.workplaceName}.`;
+      return;
+    }
+
+    geofenceInfoEl.textContent = "No assigned workplace linked yet.";
     return;
   }
 
@@ -582,56 +645,72 @@ function renderGeofenceInfo(geofenceEvaluation) {
         : "outside"
       : "not calculated";
 
-  geofenceInfoEl.textContent = `Distance check (${workplaceName}): ${distanceText} vs radius ${radiusText} (${withinText})`;
+  const reviewNote = geofenceEvaluation.reviewFlag === "outside_geofence"
+    ? " Review: outside assigned workplace area."
+    : "";
+
+  geofenceInfoEl.textContent = `Distance check (${workplaceName}): ${distanceText} vs radius ${radiusText} (${withinText}).${reviewNote}`;
 }
 
 function renderHistory(history) {
   if (!Array.isArray(history) || history.length === 0) {
-    historyBodyEl.innerHTML = `<tr><td colspan="9" class="muted">No attendance history yet.</td></tr>`;
+    historyBodyEl.innerHTML = `<tr><td colspan="6" class="muted">No attendance history yet.</td></tr>`;
     return;
   }
 
   historyBodyEl.innerHTML = history
     .map((item) => {
+      const breakSummary = item.breakStart?.length
+        ? `${item.breakStart.length} break${item.breakStart.length > 1 ? "s" : ""}`
+        : "—";
       return `
         <tr>
           <td data-label="Date">${item.date || "—"}</td>
-          <td data-label="Status">${statusBadgeHtml(item.status)}</td>
+          <td data-label="Workplace">${item.workplaceName || "—"}</td>
           <td data-label="Clock In">${formatDateTime(item.timeIn)}</td>
-          <td data-label="Break Start">${formatBreakList(item.breakStart)}</td>
-          <td data-label="Break End">${formatBreakList(item.breakEnd)}</td>
+          <td data-label="Break">${breakSummary}</td>
           <td data-label="Clock Out">${formatDateTime(item.timeOut)}</td>
-          <td data-label="Raw Duration">${item.rawDuration || formatDurationMinutes(item.totalMinutes)}</td>
-          <td data-label="Actual Hrs">${formatHours(item.actualHours)}</td>
-          <td data-label="Payable Hrs">${formatHours(item.payableHours)}</td>
+          <td data-label="Total Hours">${formatHours(item.actualHours)}</td>
         </tr>
       `;
     })
     .join("");
 }
 
-function renderWorkplaces(workplaces) {
+function toWorkplaceLocationLabel(item) {
+  const parts = [item.city, item.state, item.country].filter((x) => typeof x === "string" && x.trim());
+  if (parts.length > 0) return parts.join(", ");
+  if (item.address && String(item.address).trim()) return item.address;
+  return "Location not provided";
+}
+
+function renderWorkplaces(workplaces, workers = []) {
   if (!Array.isArray(workplaces) || workplaces.length === 0) {
-    workplacesBodyEl.innerHTML = `<tr><td colspan="8" class="muted">No workplaces yet.</td></tr>`;
+    workplacesBodyEl.innerHTML = `<tr><td colspan="7" class="muted">No workplaces yet.</td></tr>`;
     return;
   }
+
+  const assignmentCounts = workers.reduce((map, worker) => {
+    const workplaceId = worker?.assignedWorkplace?.id;
+    if (!workplaceId) return map;
+    map.set(workplaceId, (map.get(workplaceId) || 0) + 1);
+    return map;
+  }, new Map());
 
   workplacesBodyEl.innerHTML = workplaces
     .map((item) => {
       const statusText = item.active === false ? "Inactive" : "Active";
-      const toggleLabel = item.active === false ? "Activate" : "Deactivate";
+      const assignmentCount = assignmentCounts.get(item.id) || 0;
       return `
         <tr>
           <td>${item.name}</td>
-          <td>${item.city || "—"}</td>
-          <td>${item.state || "—"}</td>
-          <td>${item.country || "—"}</td>
+          <td>${toWorkplaceLocationLabel(item)}</td>
           <td>${formatCoordinates(item.latitude, item.longitude)}</td>
           <td>${item.geofenceRadiusMeters} m</td>
           <td>${statusText}</td>
+          <td>${assignmentCount}</td>
           <td>
-            <button class="ghost tiny" data-action="edit" data-id="${item.id}">Edit</button>
-            <button class="ghost tiny" data-action="toggle" data-id="${item.id}" data-active="${item.active !== false}">${toggleLabel}</button>
+            <button class="ghost tiny" data-action="view" data-id="${item.id}">View</button>
           </td>
         </tr>
       `;
@@ -739,14 +818,14 @@ async function loadWorkplacesForAdmin() {
 
     if (crmWorkplaces.length === 0) {
       setError(workplaceErrorEl, "CRM database unavailable or no workplaces found. Check CRM_DATABASE_URL configuration.");
-      workplacesBodyEl.innerHTML = `<tr><td colspan="8" class="muted">CRM workplaces unavailable. Please check server configuration.</td></tr>`;
+      workplacesBodyEl.innerHTML = `<tr><td colspan="7" class="muted">CRM workplaces unavailable. Please check server configuration.</td></tr>`;
       assignWorkplaceSelectEl.innerHTML = '<option value="">Unassigned</option>';
       renderAssignSelectors(workers, []);
       renderWorkerAssignments(workers);
       return;
     }
 
-    renderWorkplaces(crmWorkplaces);
+    renderWorkplaces(crmWorkplaces, workers);
     renderAssignSelectors(workers, crmWorkplaces);
     renderWorkerAssignments(workers);
   } catch (error) {
@@ -757,7 +836,7 @@ async function loadWorkplacesForAdmin() {
 function showCrmUnavailableMessage() {
   workplaceErrorEl.classList.remove("hidden");
   workplaceErrorEl.textContent = "CRM database is unavailable. Please check that CRM_DATABASE_URL is configured on the server.";
-  workplacesBodyEl.innerHTML = `<tr><td colspan="8" class="muted">CRM workplaces unavailable. Contact administrator.</td></tr>`;
+  workplacesBodyEl.innerHTML = `<tr><td colspan="7" class="muted">CRM workplaces unavailable. Contact administrator.</td></tr>`;
   assignWorkplaceSelectEl.innerHTML = '<option value="">Unassigned</option>';
 
   // Disable form
@@ -1529,6 +1608,8 @@ function statusBadgeHtml(status) {
   if (status === "completed") return `<span class="status-badge-completed">Completed</span>`;
   if (status === "open_shift") return `<span class="status-badge-open">Open shift</span>`;
   if (status === "missing_break_end") return `<span class="status-badge-missing">Missing break end</span>`;
+  if (status === "outside_geofence") return `<span class="status-badge-missing">Outside workplace area</span>`;
+  if (status === "workplace_unresolved") return `<span class="status-badge-warn">Workplace unresolved</span>`;
   return `<span class="status-badge-warn">${status || "—"}</span>`;
 }
 
@@ -1539,32 +1620,29 @@ function formatBreakList(arr) {
 
 function renderTimesheets(timesheets) {
   if (!Array.isArray(timesheets) || timesheets.length === 0) {
-    timesheetsBodyEl.innerHTML = `<tr><td colspan="14" class="muted">No timesheets found.</td></tr>`;
+    timesheetsBodyEl.innerHTML = `<tr><td colspan="9" class="muted">No timesheets found.</td></tr>`;
     return;
   }
 
   timesheetsBodyEl.innerHTML = timesheets.map((ts) => {
-    const noLocFlag = ts.noLocation ? ` <span class="status-badge-missing" title="No location">&#9888; No loc</span>` : "";
-    const lowAccFlag = ts.lowAccuracy ? ` <span class="status-badge-warn" title="Low accuracy (&gt;50m)">&#9888; Low acc</span>` : "";
-    const locationCell = ts.locationSummary
-      ? `${ts.locationSummary}${noLocFlag}${lowAccFlag}`
-      : `<span class="muted">—</span>${noLocFlag}`;
+    const attention = [
+      ts.outsideGeofence ? "Outside workplace area" : null,
+      ts.unresolvedWorkplace ? "Workplace unresolved" : null,
+      ts.status === "missing_break_end" ? "Missing break end" : null,
+      ts.status === "open_shift" ? "Open shift" : null,
+      ts.noLocation ? "No location" : null,
+    ].filter(Boolean);
 
     return `
       <tr class="ts-row" data-shiftid="${ts.shiftId}">
         <td>${ts.workerName || "—"}</td>
-        <td>${ts.workerStaffId || "—"}</td>
         <td>${ts.date || "—"}</td>
-        <td>${statusBadgeHtml(ts.status)}</td>
-        <td>${formatDateTime(ts.clockInAt)}</td>
-        <td>${formatBreakList(ts.breakStartAt)}</td>
-        <td>${formatBreakList(ts.breakEndAt)}</td>
-        <td>${formatDateTime(ts.clockOutAt)}</td>
-        <td>${ts.rawDuration || formatDurationMinutes(ts.totalMinutes)}</td>
-        <td>${formatHours(ts.actualHours)}</td>
-        <td>${formatHours(ts.payableHours)}</td>
         <td>${ts.workplaceName || "—"}</td>
-        <td>${locationCell}</td>
+        <td>${formatDateTime(ts.clockInAt)}</td>
+        <td>${formatDateTime(ts.clockOutAt)}</td>
+        <td>${formatHours(ts.actualHours)}</td>
+        <td>${statusBadgeHtml(ts.status)}</td>
+        <td>${attention.length ? attention.join(", ") : "—"}</td>
         <td>${ts.clockInNotes || ts.clockOutNotes || "—"}</td>
       </tr>`;
   }).join("");

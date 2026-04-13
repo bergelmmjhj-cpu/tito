@@ -9,7 +9,8 @@ import {
 } from "../models/timeLogModel.js";
 import { findUserById } from "../models/userModel.js";
 import { findWorkplaceById } from "../models/workplaceModel.js";
-import { findWorkplaceByIdFromCrm } from "../models/crmWorkplaceModel.js";
+import { findWorkplaceByIdFromCrm, listWorkplacesFromCrm } from "../models/crmWorkplaceModel.js";
+import { listWorkplaces } from "../models/workplaceModel.js";
 import { calculateDistanceMeters } from "./geofenceService.js";
 import { buildShiftHourSummary } from "./payableHoursService.js";
 import { HttpError } from "../utils/errors.js";
@@ -17,6 +18,9 @@ import { HttpError } from "../utils/errors.js";
 const NOTES_MAX_LENGTH = 500; // keep notes concise for UI display and log storage
 const LOCATION_REQUIRED = process.env.REQUIRE_ATTENDANCE_LOCATION !== "false";
 const ENFORCE_CLOCKIN_GEOFENCE = process.env.ENFORCE_CLOCKIN_GEOFENCE === "true";
+const NEAREST_WORKPLACE_MAX_DISTANCE_METERS = Number(
+  process.env.NEAREST_WORKPLACE_MAX_DISTANCE_METERS || 250
+);
 const ACTION_TYPES = new Set(["clock_in", "break_start", "break_end", "clock_out"]);
 
 function getActiveBreak(shift) {
@@ -179,6 +183,61 @@ async function resolveWorkplaceAssignment(userId) {
   };
 }
 
+async function listActiveWorkplacesForResolution() {
+  const merged = new Map();
+
+  try {
+    const crm = await listWorkplacesFromCrm();
+    for (const workplace of crm || []) {
+      if (!workplace || workplace.active === false) continue;
+      merged.set(workplace.id, workplace);
+    }
+  } catch {
+    // Ignore CRM lookup failures; local fallback still applies.
+  }
+
+  try {
+    const local = await listWorkplaces();
+    for (const workplace of local || []) {
+      if (!workplace || workplace.active === false) continue;
+      if (!merged.has(workplace.id)) merged.set(workplace.id, workplace);
+    }
+  } catch {
+    // Ignore local lookup failures if CRM already loaded.
+  }
+
+  return Array.from(merged.values());
+}
+
+function resolveNearestWorkplace(location, workplaces) {
+  if (!location || !Array.isArray(workplaces) || workplaces.length === 0) return null;
+
+  let best = null;
+  for (const workplace of workplaces) {
+    const normalized = normalizeGeofenceInputs(workplace);
+    if (!normalized.valid) continue;
+
+    const distanceMeters = calculateDistanceMeters(
+      { latitude: location.latitude, longitude: location.longitude },
+      { latitude: normalized.latitude, longitude: normalized.longitude }
+    );
+
+    if (!best || distanceMeters < best.distanceMeters) {
+      best = {
+        workplace,
+        distanceMeters,
+        radiusMeters: normalized.radiusMeters,
+      };
+    }
+  }
+
+  if (!best) return null;
+  return {
+    ...best,
+    withinSafeRadius: best.distanceMeters <= NEAREST_WORKPLACE_MAX_DISTANCE_METERS,
+  };
+}
+
 function normalizeGeofenceInputs(workplace) {
   const latitude = Number(workplace?.latitude);
   const longitude = Number(workplace?.longitude);
@@ -204,16 +263,22 @@ function normalizeGeofenceInputs(workplace) {
   };
 }
 
-async function evaluateGeofenceForAction(userId, location) {
+async function evaluateGeofenceForAction(userId, location, actionType) {
   const assignment = await resolveWorkplaceAssignment(userId);
   if (assignment.assignmentInvalid) {
     return {
       assignmentRequired: true,
       workplaceId: null,
       workplaceName: null,
+      resolvedWorkplaceId: null,
+      resolvedWorkplaceName: null,
+      workplaceResolution: "unresolved",
+      assignedWorkplaceUsed: false,
+      reviewFlag: "assignment_invalid",
       radiusMeters: null,
       distanceMeters: null,
       withinGeofence: null,
+      geofenceMatched: null,
       enforcementEnabled: ENFORCE_CLOCKIN_GEOFENCE,
       assignmentInvalid: true,
       issue: assignment.issue,
@@ -221,14 +286,45 @@ async function evaluateGeofenceForAction(userId, location) {
   }
 
   if (!assignment.assignmentRequired) {
+    const shouldTryNearest = actionType === "clock_in" && location;
+    if (shouldTryNearest) {
+      const candidates = await listActiveWorkplacesForResolution();
+      const nearest = resolveNearestWorkplace(location, candidates);
+      if (nearest && nearest.withinSafeRadius) {
+        return {
+          assignmentRequired: false,
+          workplaceId: nearest.workplace.id,
+          workplaceName: nearest.workplace.name,
+          resolvedWorkplaceId: nearest.workplace.id,
+          resolvedWorkplaceName: nearest.workplace.name,
+          workplaceResolution: "nearest",
+          assignedWorkplaceUsed: false,
+          reviewFlag: "no_assignment_nearest_used",
+          radiusMeters: nearest.radiusMeters,
+          distanceMeters: Number(nearest.distanceMeters.toFixed(2)),
+          withinGeofence: nearest.distanceMeters <= nearest.radiusMeters,
+          geofenceMatched: nearest.distanceMeters <= nearest.radiusMeters,
+          enforcementEnabled: ENFORCE_CLOCKIN_GEOFENCE,
+          issue: "No assigned workplace. Nearest workplace was linked automatically.",
+        };
+      }
+    }
+
     return {
       assignmentRequired: false,
       workplaceId: null,
       workplaceName: null,
+      resolvedWorkplaceId: null,
+      resolvedWorkplaceName: null,
+      workplaceResolution: "unresolved",
+      assignedWorkplaceUsed: false,
+      reviewFlag: "no_assignment",
       radiusMeters: null,
       distanceMeters: null,
       withinGeofence: null,
+      geofenceMatched: null,
       enforcementEnabled: ENFORCE_CLOCKIN_GEOFENCE,
+      issue: "No workplace assigned. Attendance saved with workplace unresolved.",
     };
   }
 
@@ -237,9 +333,15 @@ async function evaluateGeofenceForAction(userId, location) {
       assignmentRequired: true,
       workplaceId: assignment.assignment,
       workplaceName: assignment.workplace?.name || null,
+      resolvedWorkplaceId: assignment.assignment || null,
+      resolvedWorkplaceName: assignment.workplace?.name || null,
+      workplaceResolution: "assigned",
+      assignedWorkplaceUsed: true,
+      reviewFlag: "assignment_unavailable",
       radiusMeters: assignment.workplace?.geofenceRadiusMeters || null,
       distanceMeters: null,
       withinGeofence: null,
+      geofenceMatched: null,
       enforcementEnabled: ENFORCE_CLOCKIN_GEOFENCE,
       assignmentUnavailable: true,
       issue: "Assigned workplace is unavailable or inactive",
@@ -252,9 +354,15 @@ async function evaluateGeofenceForAction(userId, location) {
       assignmentRequired: true,
       workplaceId: assignment.workplace.id,
       workplaceName: assignment.workplace.name,
+      resolvedWorkplaceId: assignment.workplace.id,
+      resolvedWorkplaceName: assignment.workplace.name,
+      workplaceResolution: "assigned",
+      assignedWorkplaceUsed: true,
+      reviewFlag: "assignment_invalid",
       radiusMeters: null,
       distanceMeters: null,
       withinGeofence: null,
+      geofenceMatched: null,
       enforcementEnabled: ENFORCE_CLOCKIN_GEOFENCE,
       assignmentInvalid: true,
       issue: normalizedInputs.issue,
@@ -266,9 +374,15 @@ async function evaluateGeofenceForAction(userId, location) {
       assignmentRequired: true,
       workplaceId: assignment.workplace.id,
       workplaceName: assignment.workplace.name,
+      resolvedWorkplaceId: assignment.workplace.id,
+      resolvedWorkplaceName: assignment.workplace.name,
+      workplaceResolution: "assigned",
+      assignedWorkplaceUsed: true,
+      reviewFlag: "missing_location",
       radiusMeters: normalizedInputs.radiusMeters,
       distanceMeters: null,
       withinGeofence: null,
+      geofenceMatched: null,
       enforcementEnabled: ENFORCE_CLOCKIN_GEOFENCE,
     };
   }
@@ -285,9 +399,15 @@ async function evaluateGeofenceForAction(userId, location) {
     assignmentRequired: true,
     workplaceId: assignment.workplace.id,
     workplaceName: assignment.workplace.name,
+    resolvedWorkplaceId: assignment.workplace.id,
+    resolvedWorkplaceName: assignment.workplace.name,
+    workplaceResolution: "assigned",
+    assignedWorkplaceUsed: true,
+    reviewFlag: withinGeofence ? null : "outside_geofence",
     radiusMeters,
     distanceMeters: Number(distanceMeters.toFixed(2)),
     withinGeofence,
+    geofenceMatched: withinGeofence,
     enforcementEnabled: ENFORCE_CLOCKIN_GEOFENCE,
   };
 }
@@ -311,7 +431,7 @@ export async function performAction(userId, actionType, notes, location) {
   const normalizedAction = typeof actionType === "string" ? actionType.trim() : "";
   const cleanNotes = validateNotes(notes);
   const cleanLocation = parseActionLocation(normalizedAction, location);
-  const geofenceEvaluation = await evaluateGeofenceForAction(userId, cleanLocation);
+  const geofenceEvaluation = await evaluateGeofenceForAction(userId, cleanLocation, normalizedAction);
   const openShift = await getOpenShiftForUser(userId);
   const activeBreak = getActiveBreak(openShift);
 
@@ -321,6 +441,8 @@ export async function performAction(userId, actionType, notes, location) {
     hasLocation: Boolean(cleanLocation),
     workplaceId: geofenceEvaluation.workplaceId ?? null,
     withinGeofence: geofenceEvaluation.withinGeofence ?? null,
+    workplaceResolution: geofenceEvaluation.workplaceResolution ?? null,
+    reviewFlag: geofenceEvaluation.reviewFlag ?? null,
     geofenceEnforced: geofenceEvaluation.enforcementEnabled ?? false,
     openShiftId: openShift?.id ?? null,
     activeBreakId: activeBreak?.id ?? null,
@@ -415,14 +537,16 @@ export async function getAttendanceActionHistory(userId) {
     latitude: typeof log.location?.latitude === "number" ? log.location.latitude : null,
     longitude: typeof log.location?.longitude === "number" ? log.location.longitude : null,
     accuracy: typeof log.location?.accuracy === "number" ? log.location.accuracy : null,
-    workplaceId: log.geofence?.workplaceId || null,
-    workplaceName: log.geofence?.workplaceName || null,
+    workplaceId: log.geofence?.resolvedWorkplaceId || log.geofence?.workplaceId || null,
+    workplaceName: log.geofence?.resolvedWorkplaceName || log.geofence?.workplaceName || null,
     geofenceRadiusMeters:
       typeof log.geofence?.radiusMeters === "number" ? log.geofence.radiusMeters : null,
     distanceMeters:
       typeof log.geofence?.distanceMeters === "number" ? log.geofence.distanceMeters : null,
     withinGeofence:
       typeof log.geofence?.withinGeofence === "boolean" ? log.geofence.withinGeofence : null,
+    workplaceResolution: log.geofence?.workplaceResolution || null,
+    reviewFlag: log.geofence?.reviewFlag || null,
     notes: log.notes || null,
   }));
 }
@@ -447,6 +571,12 @@ export async function getAttendanceHistory(userId) {
     const breakStart = shift.breaks?.map((item) => item.startAt).filter(Boolean) || [];
     const breakEnd = shift.breaks?.map((item) => item.endAt).filter(Boolean) || [];
     const summary = buildShiftHourSummary(shift);
+    const workplaceName =
+      clockInLog?.geofence?.resolvedWorkplaceName ||
+      clockInLog?.geofence?.workplaceName ||
+      (clockInLog?.geofence?.workplaceResolution === "unresolved"
+        ? "Workplace not resolved"
+        : "Unassigned workplace");
 
     return {
       shiftId: shift.id,
@@ -462,6 +592,9 @@ export async function getAttendanceHistory(userId) {
       totalHours: summary.actualHours,
       totalMinutes: summary.workedMinutes,
       breakMinutes: summary.breakMinutes,
+      workplaceName,
+      workplaceResolution: clockInLog?.geofence?.workplaceResolution || "unresolved",
+      workplaceReviewFlag: clockInLog?.geofence?.reviewFlag || null,
       clockInNotes: clockInLog?.notes || null,
       clockOutNotes: clockOutLog?.notes || null,
     };
