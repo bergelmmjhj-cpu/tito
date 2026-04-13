@@ -1234,7 +1234,8 @@ async function initFromSession() {
       await requestLocationForTimeClock("session_restore");
     }
   } catch (error) {
-    setLoggedOutState();
+      setLoggedOutState();
+      setError(loginErrorEl, "Session could not be restored. Please sign in again.");
   }
 }
 
@@ -1664,12 +1665,13 @@ closeTimesheetDetailBtnEl.addEventListener("click", () => {
 startLiveClock();
 resetWorkplaceForm();
 showMapPlaceholder("Location not captured yet.", "Waiting for location");
-consumeAuthErrorFromUrl();
 updateLocationPermissionState().catch(() => {
   locationPermissionState = "unsupported";
   renderLocationDebug();
 });
-initFromSession();
+initFromSession().finally(() => {
+  consumeAuthErrorFromUrl();
+});
 
 window.addEventListener("beforeunload", () => {
   if (liveClockIntervalId) clearInterval(liveClockIntervalId);
