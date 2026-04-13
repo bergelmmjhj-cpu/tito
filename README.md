@@ -86,13 +86,8 @@ DEFAULT_ADMIN_EMAIL=admin@hotel.local
 DEFAULT_ADMIN_PASSWORD=<set-strong-password>
 ```
 
-If you keep values in `server/.env`, run node with `--env-file`:
-
-```bash
-node --env-file=server/.env server/index.js
-```
-
-or export env vars before `npm start`.
+If you keep values in `server/.env`, `npm start` now loads them automatically.
+If `server/.env` is missing, Google OAuth and bootstrap admin credentials will not be configured.
 
 ### Manual admin seed command
 
@@ -115,6 +110,7 @@ If you configure a Google OAuth web client, the app can start Google sign-in fro
 - Set `GOOGLE_CLIENT_ID`
 - Set `GOOGLE_CLIENT_SECRET`
 - Set `GOOGLE_REDIRECT_URI`
+- Ensure those values exist in runtime environment variables or `server/.env`
 - For local development, use `http://localhost:3000/api/auth/google/callback`
 - For Railway production, use your deployed domain, for example `https://tito-production-e1d5.up.railway.app/api/auth/google/callback`
 

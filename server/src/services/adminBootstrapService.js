@@ -67,7 +67,7 @@ function buildBootstrapAdminPatch(config, passwordSalt, passwordHash, source, cu
 export async function ensureBootstrapAdminExists(source = "startup") {
   const seedConfig = getBootstrapAdminSeed();
   let config = seedConfig;
-  let usingDevFallback = false;
+  let fallbackMode = null;
 
   try {
     ensureValidBootstrapConfig(config);
@@ -75,7 +75,8 @@ export async function ensureBootstrapAdminExists(source = "startup") {
     const users = await listUsers();
     const isProduction = String(process.env.NODE_ENV || "").toLowerCase() === "production";
 
-    if (!isProduction && users.length === 0) {
+    // Keep login recoverable on a brand-new deployment even when admin env vars are missing.
+    if (users.length === 0) {
       config = {
         firstName: seedConfig.firstName || DEVELOPMENT_FALLBACK_ADMIN.firstName,
         lastName: seedConfig.lastName || DEVELOPMENT_FALLBACK_ADMIN.lastName,
@@ -83,7 +84,7 @@ export async function ensureBootstrapAdminExists(source = "startup") {
         password: DEVELOPMENT_FALLBACK_ADMIN.password,
         staffId: seedConfig.staffId || DEVELOPMENT_FALLBACK_ADMIN.staffId,
       };
-      usingDevFallback = true;
+      fallbackMode = isProduction ? "emergency" : "dev";
     } else {
       throw error;
     }
@@ -144,10 +145,22 @@ export async function ensureBootstrapAdminExists(source = "startup") {
     updatedAt: now,
   });
 
-  if (usingDevFallback) {
+  if (fallbackMode === "dev") {
     return {
       created: true,
       reason: "created_dev_fallback",
+      admin: sanitizeUser(adminUser),
+      fallbackCredentials: {
+        identifier: config.email,
+        password: DEVELOPMENT_FALLBACK_ADMIN.password,
+      },
+    };
+  }
+
+  if (fallbackMode === "emergency") {
+    return {
+      created: true,
+      reason: "created_emergency_fallback",
       admin: sanitizeUser(adminUser),
       fallbackCredentials: {
         identifier: config.email,
