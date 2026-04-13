@@ -7,6 +7,11 @@ export function createPasswordHash(password) {
 }
 
 export function verifyPassword(password, salt, hash) {
+  // If either salt or hash is missing, password verification fails
+  if (!salt || !hash) {
+    return false;
+  }
+
   const incoming = crypto
     .pbkdf2Sync(password, salt, 100_000, 64, "sha512")
     .toString("hex");

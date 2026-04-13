@@ -230,6 +230,11 @@ async function authenticateWithCredentials(identifier, password) {
   if (!user) throw new HttpError(401, "Invalid login credentials");
   if (user.isActive === false) throw new HttpError(403, "User account is inactive");
 
+  // Check if user has a password (not OAuth-only)
+  if (!user.passwordSalt || !user.passwordHash) {
+    throw new HttpError(401, "This account uses OAuth login. Please use Google Sign-In.");
+  }
+
   const ok = verifyPassword(password, user.passwordSalt, user.passwordHash);
   if (!ok) throw new HttpError(401, "Invalid login credentials");
 
