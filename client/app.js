@@ -1601,6 +1601,12 @@ async function loadTimesheets(filters, page) {
 
   const qs = buildTimesheetQueryString(filters, timesheetsCurrentPage);
   const data = await apiFetch(`/api/admin/timesheets?${qs}`);
+  console.info("[timesheets] response", {
+    filters,
+    page: timesheetsCurrentPage,
+    rowCount: Array.isArray(data?.timesheets) ? data.timesheets.length : 0,
+    pagination: data?.pagination || null,
+  });
   renderTimesheets(data?.timesheets || []);
   renderTimesheetsPagination(data?.pagination || null);
 }

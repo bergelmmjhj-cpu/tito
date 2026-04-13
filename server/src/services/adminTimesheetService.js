@@ -1,6 +1,7 @@
-import { readDatabase } from "../db/database.js";
 import { listUsers } from "../models/userModel.js";
 import { listWorkplaces, findWorkplaceById } from "../models/workplaceModel.js";
+import { listWorkplacesFromCrm } from "../models/crmWorkplaceModel.js";
+import { getAllShifts, getAllTimeLogs } from "../models/timeLogModel.js";
 import { buildShiftHourSummary } from "./payableHoursService.js";
 import { HttpError } from "../utils/errors.js";
 
@@ -21,6 +22,15 @@ function deriveShiftStatus(shift) {
 
 async function buildWorkplaceIndex() {
   const index = {};
+  try {
+    const workplaces = await listWorkplacesFromCrm();
+    workplaces.forEach((wp) => {
+      index[wp.id] = wp;
+    });
+  } catch {
+    // non-fatal — workplace data may be unavailable
+  }
+
   try {
     const workplaces = await listWorkplaces();
     workplaces.forEach((wp) => {
@@ -143,17 +153,23 @@ function matchesStatus(row, status) {
 
 function parseDate(value) {
   if (!value || typeof value !== "string") return null;
-  const d = new Date(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return null;
+  const d = new Date(`${value.trim()}T00:00:00.000Z`);
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
 async function getFilteredTimesheetRows(filters) {
-  const db = readDatabase();
-  const userIndex = await buildUserIndex();
-  const workplaceIndex = await buildWorkplaceIndex();
-  const logsByShift = buildLogsByShift(db.timeLogs || []);
+  const [users, workplaces, shifts, timeLogs] = await Promise.all([
+    buildUserIndex(),
+    buildWorkplaceIndex(),
+    getAllShifts(),
+    getAllTimeLogs(),
+  ]);
+  const userIndex = users;
+  const workplaceIndex = workplaces;
+  const logsByShift = buildLogsByShift(timeLogs || []);
 
-  const rows = (db.shifts || []).map((shift) =>
+  const rows = (shifts || []).map((shift) =>
     buildTimesheetRow(shift, userIndex[shift.userId] || null, logsByShift[shift.id] || [], workplaceIndex)
   );
 
@@ -206,6 +222,18 @@ export function parseTimesheetFilters(query) {
   const dateFromParsed = parseDate(dateFrom);
   const dateToParsed = parseDate(dateTo);
 
+  if (dateFrom && !dateFromParsed) {
+    throw new HttpError(400, "dateFrom must use YYYY-MM-DD format");
+  }
+
+  if (dateTo && !dateToParsed) {
+    throw new HttpError(400, "dateTo must use YYYY-MM-DD format");
+  }
+
+  if (dateFromParsed && dateToParsed && dateFromParsed > dateToParsed) {
+    throw new HttpError(400, "dateFrom must be on or before dateTo");
+  }
+
   return {
     dateFrom: dateFromParsed ? dateFromParsed.toISOString().slice(0, 10) : null,
     dateTo: dateToParsed ? dateToParsed.toISOString().slice(0, 10) : null,
@@ -223,6 +251,11 @@ export function parseTimesheetFilters(query) {
  */
 export async function listAdminTimesheets(filters) {
   const filtered = await getFilteredTimesheetRows(filters);
+
+  console.info("[admin.timesheets] rows built", {
+    filters,
+    rowCount: filtered.length,
+  });
 
   // Sort newest first
   filtered.sort((a, b) => {
@@ -283,14 +316,14 @@ export async function getAdminPayrollSummary(filters) {
 export async function getAdminTimesheetDetail(shiftId) {
   if (!shiftId || typeof shiftId !== "string") throw new HttpError(400, "shiftId is required");
 
-  const db = readDatabase();
-  const shift = (db.shifts || []).find((s) => s.id === shiftId);
+  const [allShifts, allTimeLogs] = await Promise.all([getAllShifts(), getAllTimeLogs()]);
+  const shift = (allShifts || []).find((s) => s.id === shiftId);
   if (!shift) throw new HttpError(404, "Shift not found");
 
   const userIndex = await buildUserIndex();
   const user = userIndex[shift.userId] || null;
   const workplaceIndex = await buildWorkplaceIndex();
-  const shiftLogs = (db.timeLogs || []).filter((l) => l.shiftId === shiftId);
+  const shiftLogs = (allTimeLogs || []).filter((l) => l.shiftId === shiftId);
 
   const row = buildTimesheetRow(shift, user, shiftLogs, workplaceIndex);
 
@@ -360,6 +393,11 @@ export async function buildTimesheetsCsv(filters) {
   // Fetch all without pagination for CSV
   const allFilters = { ...filters, page: 1, limit: MAX_PAGE_LIMIT * 100 };
   const { timesheets } = await listAdminTimesheets(allFilters);
+
+  console.info("[admin.timesheets.csv] exporting rows", {
+    filters: allFilters,
+    rowCount: timesheets.length,
+  });
 
   const header = CSV_COLUMNS.map((c) => escapeCsvCell(c.header)).join(",");
   const rows = timesheets.map((row) =>

@@ -133,6 +133,33 @@ export async function getAllShiftsForUser(userId) {
   );
 }
 
+export async function getAllShifts() {
+  if (!isDatabaseReady()) {
+    const db = await readDatabaseFromJson();
+    return (db.shifts || []).slice();
+  }
+
+  const result = await query(`SELECT s.* FROM shifts s ORDER BY s.clock_in_at DESC`);
+
+  console.info("[timeLogModel.getAllShifts] fetched shifts", {
+    rowCount: result.rows.length,
+  });
+
+  return Promise.all(
+    result.rows.map(async (shift) => {
+      try {
+        const breaksResult = await query(`SELECT * FROM breaks WHERE shift_id = $1 ORDER BY start_at`, [
+          shift.id,
+        ]);
+        return normalizeDbShift(shift, breaksResult.rows);
+      } catch (breaksError) {
+        console.error(`[getAllShifts] Failed to load breaks for shift ${shift.id}:`, breaksError.message);
+        return normalizeDbShift(shift, []);
+      }
+    })
+  );
+}
+
 export async function getOpenShiftForUser(userId) {
   if (!isDatabaseReady()) {
     const db = await readDatabaseFromJson();
@@ -172,6 +199,21 @@ export async function getTimeLogsForUser(userId) {
 
   console.info("[timeLogModel.getTimeLogsForUser] fetched logs", {
     userId,
+    rowCount: result.rows.length,
+  });
+
+  return result.rows.map(normalizeDbTimeLog);
+}
+
+export async function getAllTimeLogs() {
+  if (!isDatabaseReady()) {
+    const db = await readDatabaseFromJson();
+    return (db.timeLogs || []).slice();
+  }
+
+  const result = await query(`SELECT * FROM time_logs ORDER BY timestamp DESC`);
+
+  console.info("[timeLogModel.getAllTimeLogs] fetched logs", {
     rowCount: result.rows.length,
   });
 
