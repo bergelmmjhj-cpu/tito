@@ -5,6 +5,13 @@ import { HttpError } from "../utils/errors.js";
 import { createUser, findUserByEmail, findUserByStaffId, listUsers, updateUserById, findUserByIdentifier } from "../models/userModel.js";
 
 const PASSWORD_MIN_LENGTH = 8;
+const DEVELOPMENT_FALLBACK_ADMIN = {
+  firstName: "System",
+  lastName: "Admin",
+  email: "admin@hotel.local",
+  password: "admin12345",
+  staffId: "A1000",
+};
 
 function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
@@ -58,8 +65,29 @@ function buildBootstrapAdminPatch(config, passwordSalt, passwordHash, source, cu
 }
 
 export async function ensureBootstrapAdminExists(source = "startup") {
-  const config = getBootstrapAdminSeed();
-  ensureValidBootstrapConfig(config);
+  const seedConfig = getBootstrapAdminSeed();
+  let config = seedConfig;
+  let usingDevFallback = false;
+
+  try {
+    ensureValidBootstrapConfig(config);
+  } catch (error) {
+    const users = await listUsers();
+    const isProduction = String(process.env.NODE_ENV || "").toLowerCase() === "production";
+
+    if (!isProduction && users.length === 0) {
+      config = {
+        firstName: seedConfig.firstName || DEVELOPMENT_FALLBACK_ADMIN.firstName,
+        lastName: seedConfig.lastName || DEVELOPMENT_FALLBACK_ADMIN.lastName,
+        email: isValidEmail(seedConfig.email) ? seedConfig.email : DEVELOPMENT_FALLBACK_ADMIN.email,
+        password: DEVELOPMENT_FALLBACK_ADMIN.password,
+        staffId: seedConfig.staffId || DEVELOPMENT_FALLBACK_ADMIN.staffId,
+      };
+      usingDevFallback = true;
+    } else {
+      throw error;
+    }
+  }
 
   const users = await listUsers();
   const adminUsers = users.filter((user) => user.role === "admin");
@@ -115,6 +143,18 @@ export async function ensureBootstrapAdminExists(source = "startup") {
     createdAt: now,
     updatedAt: now,
   });
+
+  if (usingDevFallback) {
+    return {
+      created: true,
+      reason: "created_dev_fallback",
+      admin: sanitizeUser(adminUser),
+      fallbackCredentials: {
+        identifier: config.email,
+        password: DEVELOPMENT_FALLBACK_ADMIN.password,
+      },
+    };
+  }
 
   return { created: true, reason: "created", admin: sanitizeUser(adminUser) };
 }

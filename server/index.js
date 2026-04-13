@@ -55,6 +55,11 @@ async function startServer() {
       const result = await ensureBootstrapAdminExists("startup_bootstrap");
       if (result.created) {
         console.log(`[startup] bootstrap_admin=created email=${result.admin.email}`);
+        if (result.reason === "created_dev_fallback" && result.fallbackCredentials) {
+          console.warn(
+            `[startup] bootstrap_admin_dev_fallback identifier=${result.fallbackCredentials.identifier} password=${result.fallbackCredentials.password}`
+          );
+        }
       } else if (result.reason === "password_synced") {
         console.log(`[startup] bootstrap_admin=password_synced email=${result.admin.email}`);
       } else if (result.reason === "identifier_synced") {

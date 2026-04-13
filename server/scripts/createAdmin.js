@@ -1,9 +1,9 @@
 import { initializeDatabase } from "../src/db/database.js";
 import { ensureBootstrapAdminExists } from "../src/services/adminBootstrapService.js";
 
-function main() {
+async function main() {
   initializeDatabase();
-  const result = ensureBootstrapAdminExists("manual_seed_script");
+  const result = await ensureBootstrapAdminExists("manual_seed_script");
 
   if (result.created) {
     console.log(`Admin created: ${result.admin.email} (${result.admin.staffId})`);
