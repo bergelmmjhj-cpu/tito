@@ -83,7 +83,7 @@ const CREATE_TABLES_SQL = `
 
   CREATE INDEX IF NOT EXISTS idx_shifts_user_id ON shifts(user_id);
   CREATE INDEX IF NOT EXISTS idx_shifts_clock_in_at ON shifts(clock_in_at);
-  CREATE INDEX IF NOT EXISTS idx_shifts_open ON shifts(user_id) WHERE clock_out_at IS NULL;
+  CREATE UNIQUE INDEX IF NOT EXISTS uq_shifts_one_open_per_user ON shifts(user_id) WHERE clock_out_at IS NULL;
 
   -- Breaks table
   CREATE TABLE IF NOT EXISTS breaks (

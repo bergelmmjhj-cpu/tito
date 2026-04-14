@@ -77,6 +77,7 @@ ADMIN_STAFF_ID=A1000
 GOOGLE_CLIENT_ID=<optional-google-client-id>
 GOOGLE_CLIENT_SECRET=<optional-google-client-secret>
 GOOGLE_REDIRECT_URI=<optional-google-callback-uri>
+CORS_ALLOWED_ORIGINS=<optional-comma-separated-origin-allowlist>
 ```
 
 Backward-compatible aliases are still supported:
@@ -101,11 +102,13 @@ This command creates an admin only if no admin exists.
 
 ### Admin login process
 
-After bootstrap/seed, log in from the normal login page using admin staff ID or email and password. The UI enables admin-only pages (Workplaces and Timesheets) based on the user role returned by auth.
+After bootstrap/seed, log in from the normal login page using admin staff ID or email and password. Staff and admins now use the same login form. The UI enables admin-only pages (Workplaces and Timesheets) based on the user role returned by auth.
 
 ### Google login (optional)
 
 If you configure a Google OAuth web client, the app can start Google sign-in from the login screen.
+
+When Google OAuth is not configured on the server, the Google sign-in button stays hidden automatically.
 
 - Set `GOOGLE_CLIENT_ID`
 - Set `GOOGLE_CLIENT_SECRET`
@@ -167,6 +170,7 @@ curl http://localhost:3000/health
 - `REQUIRE_ATTENDANCE_LOCATION=true` (default): location must be provided for attendance actions.
 - Set `REQUIRE_ATTENDANCE_LOCATION=false` only if you explicitly want to allow missing location payloads.
 - `ENFORCE_CLOCKIN_GEOFENCE=false` (default): if set to `true`, clock-in is rejected when outside the assigned workplace radius.
+- `CORS_ALLOWED_ORIGINS`: optional comma-separated list of additional origins allowed to call the API in production. Same-origin requests from the deployed app continue to work automatically.
 
 ## Signup flow
 

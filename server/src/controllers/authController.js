@@ -1,8 +1,10 @@
 import crypto from "node:crypto";
 import {
+  getAuthOptions,
   buildGoogleAuthorizationUrl,
   login,
   loginWithGoogleAuthorizationCode,
+  logout,
   registerWorker,
   requireUserFromToken,
 } from "../services/authService.js";
@@ -112,6 +114,26 @@ export async function meController(req, res) {
     const token = parseBearerToken(req);
     const user = await requireUserFromToken(token);
     res.json({ user });
+  } catch (error) {
+    const err = toHttpError(error);
+    res.status(err.status).json({ error: err.message });
+  }
+}
+
+export async function authOptionsController(req, res) {
+  try {
+    res.json(getAuthOptions(getRequestOrigin(req)));
+  } catch (error) {
+    const err = toHttpError(error);
+    res.status(err.status).json({ error: err.message });
+  }
+}
+
+export async function logoutController(req, res) {
+  try {
+    const token = parseBearerToken(req);
+    await logout(token);
+    res.status(204).end();
   } catch (error) {
     const err = toHttpError(error);
     res.status(err.status).json({ error: err.message });

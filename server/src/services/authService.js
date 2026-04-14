@@ -10,7 +10,7 @@ import {
 } from "../models/userModel.js";
 import { createPasswordHash, verifyPassword } from "../utils/password.js";
 import { HttpError } from "../utils/errors.js";
-import { createSession, getSessionUserId } from "./sessionService.js";
+import { createSession, deleteSession, getSessionUserId } from "./sessionService.js";
 
 const PASSWORD_MIN_LENGTH = 8;
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -109,6 +109,26 @@ function getGoogleOAuthConfig(origin) {
   }
 
   return { clientId, clientSecret, redirectUri };
+}
+
+export function isGoogleOAuthEnabled(origin) {
+  try {
+    getGoogleOAuthConfig(origin);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function getAuthOptions(origin) {
+  return {
+    unifiedLogin: true,
+    providers: {
+      google: {
+        enabled: isGoogleOAuthEnabled(origin),
+      },
+    },
+  };
 }
 
 async function exchangeGoogleCodeForTokens(code, origin) {
@@ -328,4 +348,9 @@ export async function requireUserFromToken(token) {
   const user = await findUserById(userId);
   if (!user) throw new HttpError(401, "Invalid session user");
   return sanitizeUser(user);
+}
+
+export async function logout(token) {
+  if (!token) return;
+  await deleteSession(token);
 }

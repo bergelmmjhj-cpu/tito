@@ -92,6 +92,7 @@ async function applySchemaAlterations() {
     `ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL`,
     `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS actual_hours NUMERIC(10, 2)`,
     `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS payable_hours NUMERIC(10, 2)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS uq_shifts_one_open_per_user ON shifts(user_id) WHERE clock_out_at IS NULL`,
   ];
 
   for (const sql of alterations) {

@@ -3,6 +3,7 @@ import { query, withClient } from "../db/pool.js";
 import { buildShiftHourSummary } from "../services/payableHoursService.js";
 import { nowIso } from "../utils/time.js";
 import { isDatabaseReady, readDatabaseFromJson, writeDatabaseToJson } from "../db/initialization.js";
+import { HttpError } from "../utils/errors.js";
 
 function toNumberOrNull(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -260,6 +261,17 @@ export async function saveClockIn(userId, notes = null, location = null, geofenc
     await client.query("BEGIN");
 
     try {
+      await client.query(`SELECT id FROM users WHERE id = $1 FOR UPDATE`, [userId]);
+
+      const existingShift = await client.query(
+        `SELECT id FROM shifts WHERE user_id = $1 AND clock_out_at IS NULL LIMIT 1 FOR UPDATE`,
+        [userId]
+      );
+
+      if (existingShift.rows.length > 0) {
+        throw new HttpError(409, "Cannot clock in: shift already open");
+      }
+
       await client.query(
         `INSERT INTO shifts (id, user_id, clock_in_at, clock_out_at, created_at, updated_at)
         VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -301,6 +313,11 @@ export async function saveClockIn(userId, notes = null, location = null, geofenc
       };
     } catch (error) {
       await client.query("ROLLBACK");
+
+       if (error?.code === "23505") {
+        throw new HttpError(409, "Cannot clock in: shift already open");
+      }
+
       throw error;
     }
   });

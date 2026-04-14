@@ -24,6 +24,43 @@ const __dirname = dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+function getRequestOrigin(req) {
+  const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+  const forwardedHost = String(req.headers["x-forwarded-host"] || "").split(",")[0].trim();
+  const protocol = forwardedProto || req.protocol || "http";
+  const host = forwardedHost || req.get("host") || "";
+  return host ? `${protocol}://${host}` : "";
+}
+
+function parseAllowedOrigins() {
+  return String(process.env.CORS_ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function buildCorsOptions(environment) {
+  const configuredOrigins = parseAllowedOrigins();
+
+  return (req, callback) => {
+    const requestOrigin = req.headers.origin;
+
+    if (!requestOrigin) {
+      callback(null, { origin: false });
+      return;
+    }
+
+    if (environment !== "production" && configuredOrigins.length === 0) {
+      callback(null, { origin: true });
+      return;
+    }
+
+    const sameOrigin = requestOrigin === getRequestOrigin(req);
+    const allowed = sameOrigin || configuredOrigins.includes(requestOrigin);
+    callback(null, { origin: allowed });
+  };
+}
+
 async function startServer() {
   try {
     const environment = process.env.NODE_ENV || "development";
@@ -81,7 +118,7 @@ async function startServer() {
     // Trust proxy headers from Railway
     app.set('trust proxy', 1);
 
-    app.use(cors());
+  app.use(cors(buildCorsOptions(environment)));
     app.use(express.json());
     app.use(express.static(join(__dirname, "../client")));
 

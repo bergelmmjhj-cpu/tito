@@ -8,9 +8,10 @@ const showSignupBtnEl = document.getElementById("showSignupBtn");
 const identifierEl = document.getElementById("identifier");
 const passwordEl = document.getElementById("password");
 const loginBtnEl = document.getElementById("loginBtn");
-const adminLoginBtnEl = document.getElementById("adminLoginBtn");
 const googleLoginBtnEl = document.getElementById("googleLoginBtn");
 const loginErrorEl = document.getElementById("loginError");
+const loginHelpTextEl = document.getElementById("loginHelpText");
+const authDividerEl = document.getElementById("authDivider");
 
 const signupFirstNameEl = document.getElementById("signupFirstName");
 const signupLastNameEl = document.getElementById("signupLastName");
@@ -116,6 +117,14 @@ let lastLocationCheckAt = null;
 let actionInProgress = null;
 let actionUiResetTimer = null;
 let latestGeofenceEvaluation = null;
+let authOptions = {
+  unifiedLogin: true,
+  providers: {
+    google: {
+      enabled: false,
+    },
+  },
+};
 
 const ACTION_BUTTONS = {
   clock_in: clockInBtnEl,
@@ -1311,36 +1320,72 @@ async function login() {
   authToken = data.token;
   localStorage.setItem(TOKEN_KEY, authToken);
   setLoggedInState();
+  await Promise.all([loadStatus(), loadHistory()]);
+
+  if (currentUser?.role === "admin") {
+    openScreen("users");
+    await loadAdminUsers();
+    return;
+  }
+
   openScreen("time");
-  await Promise.all([loadStatus(), loadHistory()]);
   await requestLocationForTimeClock("worker_login");
-}
-
-async function loginAsAdmin() {
-  setError(loginErrorEl, "");
-  const identifier = identifierEl.value.trim();
-  const password = passwordEl.value;
-
-  if (!identifier) return setError(loginErrorEl, "Email or staff ID is required.");
-  if (!password) return setError(loginErrorEl, "Password is required.");
-
-  const data = await apiFetch("/api/admin/login", {
-    method: "POST",
-    body: JSON.stringify({ identifier, password }),
-  });
-
-  authToken = data.token;
-  localStorage.setItem(TOKEN_KEY, authToken);
-  setLoggedInState();
-  await Promise.all([loadStatus(), loadHistory()]);
-
-  openScreen("users");
-  await loadAdminUsers();
 }
 
 function startGoogleLogin() {
   setError(loginErrorEl, "");
+
+  if (!authOptions?.providers?.google?.enabled) {
+    setError(loginErrorEl, "Google sign-in is not available right now.");
+    return;
+  }
+
   window.location.assign(`${API_BASE_URL}/api/auth/google`);
+}
+
+function applyAuthOptions(options) {
+  authOptions = options || authOptions;
+  const googleEnabled = Boolean(authOptions?.providers?.google?.enabled);
+
+  googleLoginBtnEl.classList.toggle("hidden", !googleEnabled);
+  authDividerEl.classList.toggle("hidden", !googleEnabled);
+
+  if (loginHelpTextEl) {
+    loginHelpTextEl.textContent = googleEnabled
+      ? "Staff and admins use the same login with their Staff ID or email. Google sign-in is also available when your account is enabled for it."
+      : "Staff and admins use the same login with their Staff ID or email.";
+  }
+}
+
+async function loadAuthOptions() {
+  try {
+    const options = await apiFetch("/api/auth/options");
+    applyAuthOptions(options);
+  } catch (error) {
+    console.warn("Failed to load auth options:", error.message);
+    applyAuthOptions({
+      unifiedLogin: true,
+      providers: {
+        google: {
+          enabled: false,
+        },
+      },
+    });
+  }
+}
+
+async function logout() {
+  const token = authToken;
+
+  try {
+    if (token) {
+      await apiFetch("/api/auth/logout", { method: "POST" });
+    }
+  } catch (error) {
+    console.warn("Logout request failed:", error.message);
+  } finally {
+    setLoggedOutState();
+  }
 }
 
 async function requireAdminAccessForScreen(errorEl) {
@@ -1436,10 +1481,16 @@ async function initFromSession() {
       console.warn("Failed to load shift history during session restore:", error.message);
     });
 
-    if (currentUser?.role !== "admin") {
-      openScreen("time");
-      await requestLocationForTimeClock("session_restore");
+    if (currentUser?.role === "admin") {
+      openScreen("users");
+      loadAdminUsers().catch((error) => {
+        console.warn("Failed to load admin users during session restore:", error.message);
+      });
+      return;
     }
+
+    openScreen("time");
+    await requestLocationForTimeClock("session_restore");
   } catch (error) {
       setLoggedOutState();
     setError(loginErrorEl, `Session could not be restored: ${error.message}`);
@@ -1461,15 +1512,14 @@ showSignupBtnEl.addEventListener("click", () => setAuthMode("signup"));
 loginBtnEl.addEventListener("click", () => {
   login().catch((error) => setError(loginErrorEl, error.message));
 });
-adminLoginBtnEl.addEventListener("click", () => {
-  loginAsAdmin().catch((error) => setError(loginErrorEl, error.message));
-});
 googleLoginBtnEl.addEventListener("click", startGoogleLogin);
 signupBtnEl.addEventListener("click", () => {
   signup().catch((error) => setError(signupErrorEl, error.message));
 });
 
-logoutBtnEl.addEventListener("click", () => setLoggedOutState());
+logoutBtnEl.addEventListener("click", () => {
+  logout();
+});
 
 showTimeClockBtnEl.addEventListener("click", () => openScreen("time"));
 showWorkplacesBtnEl.addEventListener("click", () => {
@@ -1881,8 +1931,10 @@ updateLocationPermissionState().catch(() => {
   locationPermissionState = "unsupported";
   renderLocationDebug();
 });
-initFromSession().finally(() => {
-  consumeAuthErrorFromUrl();
+loadAuthOptions().finally(() => {
+  initFromSession().finally(() => {
+    consumeAuthErrorFromUrl();
+  });
 });
 
 window.addEventListener("beforeunload", () => {

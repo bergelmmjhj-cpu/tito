@@ -23,12 +23,13 @@ import {
   setAdminUserRoleController,
   setAdminUserStatusController,
 } from "../controllers/adminUserController.js";
+import { adminLoginRateLimit } from "../middleware/rateLimitMiddleware.js";
 
 export function createAdminRoutes() {
   const router = Router();
 
   // Dedicated admin login endpoint.
-  router.post("/login", adminLoginController);
+  router.post("/login", adminLoginRateLimit, adminLoginController);
 
   router.use(authMiddleware);
 
