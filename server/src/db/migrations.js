@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { createPasswordHash } from "../utils/password.js";
 import { buildShiftHourSummary } from "../services/payableHoursService.js";
 
-export const CURRENT_SCHEMA_VERSION = 6;
+export const CURRENT_SCHEMA_VERSION = 7;
 
 const DEFAULT_BOOTSTRAP_ADMIN = {
   firstName: "System",
@@ -109,6 +109,7 @@ export function createInitialDatabase() {
     workplaces: [],
     shifts: [],
     timeLogs: [],
+    payrollExportBatches: [],
   };
 }
 
@@ -123,6 +124,7 @@ export function migrateDatabase(db) {
     workplaces: Array.isArray(db.workplaces) ? db.workplaces : [],
     shifts: Array.isArray(db.shifts) ? db.shifts : [],
     timeLogs: Array.isArray(db.timeLogs) ? db.timeLogs : [],
+    payrollExportBatches: Array.isArray(db.payrollExportBatches) ? db.payrollExportBatches : [],
   };
 
   if (safe.schemaVersion === 0) {
@@ -340,6 +342,40 @@ export function migrateDatabase(db) {
         : null,
     };
   });
+
+  safe.payrollExportBatches = safe.payrollExportBatches.map((batch) => ({
+    id: typeof batch?.id === "string" && batch.id.trim() ? batch.id.trim() : crypto.randomUUID(),
+    createdBy:
+      typeof batch?.createdBy === "string" && batch.createdBy.trim() ? batch.createdBy.trim() : null,
+    createdAt:
+      typeof batch?.createdAt === "string" && batch.createdAt.trim()
+        ? batch.createdAt.trim()
+        : new Date().toISOString(),
+    shiftCount:
+      typeof batch?.shiftCount === "number" && Number.isFinite(batch.shiftCount)
+        ? batch.shiftCount
+        : Array.isArray(batch?.shiftIds)
+          ? batch.shiftIds.length
+          : 0,
+    totalPayableHours:
+      typeof batch?.totalPayableHours === "number" && Number.isFinite(batch.totalPayableHours)
+        ? Number(batch.totalPayableHours.toFixed(2))
+        : 0,
+    filters:
+      batch?.filters && typeof batch.filters === "object" && !Array.isArray(batch.filters)
+        ? batch.filters
+        : {},
+    shiftIds:
+      Array.isArray(batch?.shiftIds)
+        ? batch.shiftIds.filter((item) => typeof item === "string" && item.trim())
+        : [],
+    rows: Array.isArray(batch?.rows) ? batch.rows : [],
+    csvContent: typeof batch?.csvContent === "string" ? batch.csvContent : "",
+    fileName:
+      typeof batch?.fileName === "string" && batch.fileName.trim()
+        ? batch.fileName.trim()
+        : `payroll-export-${String(batch?.createdAt || new Date().toISOString()).slice(0, 10)}-${String(batch?.id || "batch").slice(0, 8)}.csv`,
+  }));
 
   safe.schemaVersion = CURRENT_SCHEMA_VERSION;
   return safe;

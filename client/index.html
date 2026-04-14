@@ -276,11 +276,12 @@
         <div class="topbar">
           <h2>Staff Timesheets</h2>
           <div class="topbar-actions">
+            <button id="createPayrollExportBtn" type="button">Create Payroll Export</button>
             <button id="exportTimesheetsCsvBtn" type="button" class="ghost">Export CSV</button>
             <button id="refreshTimesheetsBtn" type="button" class="ghost">Refresh</button>
           </div>
         </div>
-        <p class="muted">Track worker hours by hotel business date, resolve issues, and manage payroll readiness.</p>
+        <p class="muted">Track worker hours by hotel business date, resolve issues, approve payroll, and create immutable export batches.</p>
         <div class="filter-panel">
           <label>Date From<input id="tsDateFrom" type="date" /></label>
           <label>Date To<input id="tsDateTo" type="date" /></label>
@@ -319,6 +320,14 @@
           </div>
         </div>
         <div id="timesheetSummaryCards" class="timesheet-summary-grid"></div>
+        <section class="payroll-exports-panel">
+          <div class="topbar">
+            <h3>Recent Payroll Exports</h3>
+          </div>
+          <div id="payrollExportsList" class="payroll-exports-list">
+            <p class="muted">No payroll export batches yet.</p>
+          </div>
+        </section>
         <p id="timesheetError" class="error hidden"></p>
         <div class="table-wrap">
           <table>

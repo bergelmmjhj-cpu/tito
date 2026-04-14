@@ -235,6 +235,18 @@ function formatHours(value) {
   return typeof value === "number" && Number.isFinite(value) ? value.toFixed(2) : "—";
 }
 
+function triggerCsvDownload(text, fileName) {
+  if (typeof text !== "string") throw new Error("Unexpected response from CSV export");
+  const blob = new Blob([text], { type: "text/csv;charset=utf-8;" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = fileName || `timesheets-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(link.href);
+}
+
 function consumeAuthErrorFromUrl() {
   const url = new URL(window.location.href);
   const authError = url.searchParams.get("authError");
@@ -1647,7 +1659,9 @@ const tsStatusFilterEl = document.getElementById("tsStatusFilter");
 const tsPayrollFilterEl = document.getElementById("tsPayrollFilter");
 const applyTimesheetFiltersBtnEl = document.getElementById("applyTimesheetFiltersBtn");
 const clearTimesheetFiltersBtnEl = document.getElementById("clearTimesheetFiltersBtn");
+const createPayrollExportBtnEl = document.getElementById("createPayrollExportBtn");
 const timesheetSummaryCardsEl = document.getElementById("timesheetSummaryCards");
+const payrollExportsListEl = document.getElementById("payrollExportsList");
 const timesheetsBodyEl = document.getElementById("timesheetsBody");
 const timesheetsPaginationEl = document.getElementById("timesheetsPagination");
 const timesheetErrorEl = document.getElementById("timesheetError");
@@ -1800,6 +1814,48 @@ function renderTimesheetSummary(summary) {
     .join("");
 }
 
+function renderPayrollExportBatches(batches) {
+  if (!Array.isArray(batches) || batches.length === 0) {
+    payrollExportsListEl.innerHTML = '<p class="muted">No payroll export batches yet.</p>';
+    return;
+  }
+
+  payrollExportsListEl.innerHTML = batches
+    .map((batch) => {
+      const label = batch.id ? batch.id.slice(0, 8) : "batch";
+      const createdBy = batch.createdByName || "Unknown admin";
+      const shiftCount = typeof batch.shiftCount === "number" ? batch.shiftCount : 0;
+      return `
+        <article class="payroll-export-item">
+          <div class="payroll-export-copy">
+            <div class="payroll-export-title">Batch ${label}</div>
+            <div class="payroll-export-meta">${formatDateTime(batch.createdAt)} • ${shiftCount} shifts • ${formatHours(batch.totalPayableHours)} payable hours • ${createdBy}</div>
+            <div class="payroll-export-file">${batch.fileName || "Stored CSV snapshot"}</div>
+          </div>
+          <div class="payroll-export-actions">
+            <button class="ghost tiny" data-action="download-payroll-batch" data-batchid="${batch.id}" data-filename="${escapeHtml(batch.fileName || "payroll-export.csv")}">Download CSV</button>
+          </div>
+        </article>`;
+    })
+    .join("");
+}
+
+async function loadPayrollExportBatches() {
+  try {
+    const data = await apiFetch("/api/admin/payroll-exports?limit=6");
+    renderPayrollExportBatches(data?.batches || []);
+  } catch {
+    renderPayrollExportBatches([]);
+  }
+}
+
+async function downloadPayrollExportBatch(batchId, fileName) {
+  const text = await apiFetch(`/api/admin/payroll-exports/${encodeURIComponent(batchId)}/csv`, {
+    headers: { Accept: "text/csv" },
+  });
+  triggerCsvDownload(text, fileName || `payroll-export-${batchId}.csv`);
+}
+
 function renderTimesheets(timesheets) {
   if (!Array.isArray(timesheets) || timesheets.length === 0) {
     timesheetsBodyEl.innerHTML = `<tr><td colspan="10" class="muted">No timesheets found.</td></tr>`;
@@ -1894,9 +1950,10 @@ async function initTimesheetsScreen() {
   setError(timesheetErrorEl, "");
   setInlineFeedback(timesheetActionMessageEl, "", "info");
   renderTimesheetSummary(null);
+  renderPayrollExportBatches([]);
   clearTimesheetFilters();
   timesheetDetailPanelEl.classList.add("hidden");
-  await populateWorkplaceFilter();
+  await Promise.all([populateWorkplaceFilter(), loadPayrollExportBatches()]);
   await loadTimesheets({}, 1);
 }
 
@@ -1966,7 +2023,7 @@ function renderTimesheetDetail(detail) {
   const resolutionHtml = `
     <section class="resolution-panel">
       <h3>Resolution Tools</h3>
-      <p class="detail-note">Use these actions to close operational exceptions, leave a manager audit note, and control payroll readiness. Exported status requires a closed, reviewed, already approved shift.</p>
+      <p class="detail-note">Use these actions to close operational exceptions, leave a manager audit note, and control payroll readiness. Stored payroll exports are created from the main timesheet screen after shifts are approved.</p>
       <form id="timesheetResolutionForm" class="resolution-form" data-shiftid="${detail.shiftId}">
         <label>
           Review Status
@@ -1979,9 +2036,9 @@ function renderTimesheetDetail(detail) {
         <label>
           Payroll Status
           <select name="payrollStatus">
+            ${defaultPayrollStatus === "exported" ? '<option value="exported" selected disabled>Exported via batch</option>' : ""}
             <option value="pending" ${defaultPayrollStatus === "pending" ? "selected" : ""}>Pending</option>
             <option value="approved" ${defaultPayrollStatus === "approved" ? "selected" : ""}>Approved for payroll</option>
-            <option value="exported" ${defaultPayrollStatus === "exported" ? "selected" : ""}>Exported to payroll</option>
           </select>
         </label>
 
@@ -2109,9 +2166,10 @@ async function submitTimesheetResolution(form) {
   setInlineFeedback(timesheetActionMessageEl, "Saving resolution...", "info");
 
   const formData = new FormData(form);
+  const selectedPayrollStatus = String(formData.get("payrollStatus") || "").trim();
   const payload = {
     reviewStatus: String(formData.get("reviewStatus") || "").trim() || undefined,
-    payrollStatus: String(formData.get("payrollStatus") || "").trim() || undefined,
+    payrollStatus: selectedPayrollStatus && selectedPayrollStatus !== "exported" ? selectedPayrollStatus : undefined,
     reviewNote: String(formData.get("reviewNote") || "").trim() || undefined,
   };
 
@@ -2143,6 +2201,34 @@ async function submitTimesheetResolution(form) {
   }
 }
 
+async function createPayrollExportBatch() {
+  const filters = readTimesheetFilters();
+  setError(timesheetErrorEl, "");
+  setInlineFeedback(timesheetActionMessageEl, "Creating payroll export...", "info");
+
+  try {
+    const data = await apiFetch("/api/admin/payroll-exports", {
+      method: "POST",
+      body: JSON.stringify({ filters }),
+    });
+
+    const batch = data?.batch;
+    if (!batch?.id) {
+      throw new Error("Payroll export batch was created without an id");
+    }
+
+    await Promise.all([
+      loadTimesheets(filters, 1),
+      loadPayrollExportBatches(),
+    ]);
+    setInlineFeedback(timesheetActionMessageEl, `Payroll export ${batch.id.slice(0, 8)} created.`, "success");
+    await downloadPayrollExportBatch(batch.id, batch.fileName);
+  } catch (error) {
+    setError(timesheetErrorEl, error.message);
+    setInlineFeedback(timesheetActionMessageEl, error.message, "error");
+  }
+}
+
 applyTimesheetFiltersBtnEl.addEventListener("click", () => {
   const filters = readTimesheetFilters();
   loadTimesheets(filters, 1).catch((error) => setError(timesheetErrorEl, error.message));
@@ -2158,6 +2244,10 @@ refreshTimesheetsBtnEl.addEventListener("click", () => {
   loadTimesheets(filters, timesheetsCurrentPage).catch((error) => setError(timesheetErrorEl, error.message));
 });
 
+createPayrollExportBtnEl.addEventListener("click", () => {
+  createPayrollExportBatch();
+});
+
 exportTimesheetsCsvBtnEl.addEventListener("click", () => {
   const filters = readTimesheetFilters();
   const params = new URLSearchParams();
@@ -2171,17 +2261,19 @@ exportTimesheetsCsvBtnEl.addEventListener("click", () => {
 
   apiFetch(`/api/admin/timesheets/export/csv${qs ? "?" + qs : ""}`, { headers: { Accept: "text/csv" } })
     .then((text) => {
-      if (typeof text !== "string") throw new Error("Unexpected response from CSV export");
-      const blob = new Blob([text], { type: "text/csv;charset=utf-8;" });
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = `timesheets-${new Date().toISOString().slice(0, 10)}.csv`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(link.href);
+      triggerCsvDownload(text, `timesheets-${new Date().toISOString().slice(0, 10)}.csv`);
     })
     .catch((error) => setError(timesheetErrorEl, error.message));
+});
+
+payrollExportsListEl.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-action='download-payroll-batch']");
+  if (!button) return;
+
+  downloadPayrollExportBatch(button.dataset.batchid, button.dataset.filename).catch((error) => {
+    setError(timesheetErrorEl, error.message);
+    setInlineFeedback(timesheetActionMessageEl, error.message, "error");
+  });
 });
 
 timesheetsBodyEl.addEventListener("click", (event) => {

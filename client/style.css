@@ -515,6 +515,65 @@ th {
   font-size: 0.82rem;
 }
 
+.payroll-exports-panel {
+  margin: 6px 0 12px;
+  padding: 12px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line-soft);
+  background: rgba(8, 18, 37, 0.38);
+}
+
+.payroll-exports-list {
+  display: grid;
+  gap: 10px;
+}
+
+.payroll-export-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-soft);
+  background: rgba(8, 18, 37, 0.55);
+}
+
+.payroll-export-copy {
+  min-width: 0;
+}
+
+.payroll-export-title {
+  font-weight: 700;
+}
+
+.payroll-export-meta,
+.payroll-export-file {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.payroll-export-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+}
+
+@media (max-width: 720px) {
+  .payroll-export-item {
+    flex-direction: column;
+  }
+
+  .payroll-export-actions {
+    width: 100%;
+  }
+
+  .payroll-export-actions button {
+    width: 100%;
+  }
+}
+
 .pagination-bar {
   margin-top: 10px;
   display: flex;

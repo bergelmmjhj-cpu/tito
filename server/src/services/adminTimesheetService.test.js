@@ -56,3 +56,15 @@ test("parseTimesheetResolutionPayload rejects invalid payroll statuses", () => {
     /payrollStatus must be one of/
   );
 });
+
+test("parseTimesheetResolutionPayload rejects manual exported transitions", () => {
+  assert.throws(
+    () =>
+      parseTimesheetResolutionPayload({
+        reviewStatus: "reviewed",
+        payrollStatus: "exported",
+        reviewNote: "Export should happen through a batch.",
+      }),
+    /payrollStatus must be one of: pending, approved/
+  );
+});

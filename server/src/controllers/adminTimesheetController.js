@@ -1,7 +1,10 @@
 import {
+  createAdminPayrollExportBatch,
   buildTimesheetsCsv,
+  getAdminPayrollExportBatchCsv,
   getAdminPayrollSummary,
   getAdminTimesheetDetail,
+  listAdminPayrollExportBatches,
   listAdminTimesheets,
   parseTimesheetFilters,
   resolveAdminTimesheet,
@@ -91,6 +94,64 @@ export async function payrollSummaryController(req, res) {
     console.error("[admin.timesheets.payroll] failed", {
       adminUserId: req.user?.id || null,
       query: req.query || {},
+      message: error?.message || "unknown_error",
+      name: error?.name || "Error",
+      stack: error?.stack || "no_stack",
+    });
+    const err = toHttpError(error);
+    res.status(err.status).json({ error: err.message });
+  }
+}
+
+export async function listPayrollExportBatchesController(req, res) {
+  try {
+    const rawLimit = Number(req.query?.limit);
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : 10;
+    const batches = await listAdminPayrollExportBatches(limit);
+    res.json({ batches });
+  } catch (error) {
+    console.error("[admin.payroll-exports.list] failed", {
+      adminUserId: req.user?.id || null,
+      query: req.query || {},
+      message: error?.message || "unknown_error",
+      name: error?.name || "Error",
+      stack: error?.stack || "no_stack",
+    });
+    const err = toHttpError(error);
+    res.status(err.status).json({ error: err.message });
+  }
+}
+
+export async function createPayrollExportBatchController(req, res) {
+  try {
+    const filters = parseTimesheetFilters(req.body?.filters || {});
+    const batch = await createAdminPayrollExportBatch(filters, req.user);
+    res.status(201).json({ batch });
+  } catch (error) {
+    console.error("[admin.payroll-exports.create] failed", {
+      adminUserId: req.user?.id || null,
+      body: {
+        filters: req.body?.filters || {},
+      },
+      message: error?.message || "unknown_error",
+      name: error?.name || "Error",
+      stack: error?.stack || "no_stack",
+    });
+    const err = toHttpError(error);
+    res.status(err.status).json({ error: err.message });
+  }
+}
+
+export async function downloadPayrollExportBatchCsvController(req, res) {
+  try {
+    const batch = await getAdminPayrollExportBatchCsv(req.params.batchId);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${batch.fileName}"`);
+    res.send(batch.csvContent);
+  } catch (error) {
+    console.error("[admin.payroll-exports.csv] failed", {
+      adminUserId: req.user?.id || null,
+      batchId: req.params.batchId,
       message: error?.message || "unknown_error",
       name: error?.name || "Error",
       stack: error?.stack || "no_stack",

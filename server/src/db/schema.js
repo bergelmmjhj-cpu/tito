@@ -127,6 +127,23 @@ const CREATE_TABLES_SQL = `
   CREATE INDEX IF NOT EXISTS idx_time_logs_timestamp ON time_logs(timestamp);
   CREATE INDEX IF NOT EXISTS idx_time_logs_action_type ON time_logs(action_type);
 
+  -- Immutable payroll export snapshots
+  CREATE TABLE IF NOT EXISTS payroll_export_batches (
+    id TEXT PRIMARY KEY,
+    created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    shift_count INTEGER NOT NULL,
+    total_payable_hours NUMERIC(10, 2) NOT NULL DEFAULT 0,
+    filters JSONB NOT NULL DEFAULT '{}',
+    shift_ids JSONB NOT NULL DEFAULT '[]',
+    rows_snapshot JSONB NOT NULL DEFAULT '[]',
+    csv_content TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_payroll_export_batches_created_at ON payroll_export_batches(created_at);
+  CREATE INDEX IF NOT EXISTS idx_payroll_export_batches_created_by ON payroll_export_batches(created_by);
+
   -- Sessions table
   CREATE TABLE IF NOT EXISTS sessions (
     token TEXT PRIMARY KEY,

@@ -12,9 +12,12 @@ import {
   listWorkersController,
 } from "../controllers/adminWorkerController.js";
 import {
+  createPayrollExportBatchController,
+  downloadPayrollExportBatchCsvController,
   exportTimesheetsCsvController,
   getTimesheetDetailController,
   listTimesheetsController,
+  listPayrollExportBatchesController,
   payrollSummaryController,
   resolveTimesheetController,
 } from "../controllers/adminTimesheetController.js";
@@ -49,6 +52,10 @@ export function createAdminRoutes() {
   router.post("/users", createAdminUserController);
   router.patch("/users/:userId/status", setAdminUserStatusController);
   router.patch("/users/:userId/role", setAdminUserRoleController);
+
+  router.get("/payroll-exports", listPayrollExportBatchesController);
+  router.post("/payroll-exports", createPayrollExportBatchController);
+  router.get("/payroll-exports/:batchId/csv", downloadPayrollExportBatchCsvController);
 
   // Timesheets — export must be registered before the :shiftId param route
   router.get("/timesheets/export/csv", exportTimesheetsCsvController);

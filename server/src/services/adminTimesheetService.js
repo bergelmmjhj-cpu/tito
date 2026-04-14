@@ -2,6 +2,11 @@ import { listUsers } from "../models/userModel.js";
 import { listWorkplaces } from "../models/workplaceModel.js";
 import { listWorkplacesFromCrm } from "../models/crmWorkplaceModel.js";
 import {
+  createPayrollExportBatch,
+  getPayrollExportBatchById,
+  listPayrollExportBatches,
+} from "../models/payrollExportBatchModel.js";
+import {
   applyAdminShiftResolution,
   getAllShifts,
   getAllTimeLogs,
@@ -17,6 +22,7 @@ const DEFAULT_PAGE_LIMIT = 50;
 const MAX_PAGE_LIMIT = 200;
 const REVIEW_STATUSES = new Set(["reviewed", "follow_up_required"]);
 const PAYROLL_STATUSES = new Set(["pending", "approved", "exported"]);
+const MANUAL_PAYROLL_STATUSES = new Set(["pending", "approved"]);
 const ADMIN_REVIEW_NOTE_MAX_LENGTH = 1000;
 
 // ---------------------------------------------------------------------------
@@ -238,6 +244,10 @@ function matchesPayrollStatus(row, payrollStatus) {
   return row.payrollStatus === payrollStatus;
 }
 
+function isEligibleForPayrollExport(row) {
+  return row?.status === "completed" && row?.reviewStatus === "reviewed" && row?.payrollStatus === "approved";
+}
+
 function normalizeReviewStatus(value) {
   if (value === undefined || value === null || value === "") return null;
   const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -282,10 +292,22 @@ function parseOptionalPayableHours(value) {
 function parseOptionalPayrollStatus(value) {
   if (value === undefined || value === null || value === "") return null;
   const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
-  if (!PAYROLL_STATUSES.has(normalized)) {
-    throw new HttpError(400, "payrollStatus must be one of: pending, approved, exported");
+  if (!MANUAL_PAYROLL_STATUSES.has(normalized)) {
+    throw new HttpError(400, "payrollStatus must be one of: pending, approved");
   }
   return normalized;
+}
+
+function sanitizeExportFilters(filters) {
+  return {
+    dateFrom: filters.dateFrom || null,
+    dateTo: filters.dateTo || null,
+    workerId: filters.workerId || null,
+    search: filters.search || null,
+    workplaceId: filters.workplaceId || null,
+    status: filters.status || "",
+    payrollStatus: filters.payrollStatus || "",
+  };
 }
 
 function parseDate(value) {
@@ -484,6 +506,60 @@ export async function getAdminPayrollSummary(filters) {
   };
 }
 
+function buildCsvFromRows(rows) {
+  const header = CSV_COLUMNS.map((c) => escapeCsvCell(c.header)).join(",");
+  const lines = rows.map((row) => CSV_COLUMNS.map((c) => escapeCsvCell(row[c.key])).join(","));
+  return [header, ...lines].join("\r\n");
+}
+
+function enrichPayrollExportBatch(batch, userIndex) {
+  return {
+    ...batch,
+    createdByName: batch.createdBy ? userIndex[batch.createdBy]?.name || null : null,
+  };
+}
+
+export async function listAdminPayrollExportBatches(limit = 10) {
+  const [batches, userIndex] = await Promise.all([listPayrollExportBatches(limit), buildUserIndex()]);
+  return batches.map((batch) => enrichPayrollExportBatch(batch, userIndex));
+}
+
+export async function getAdminPayrollExportBatchCsv(batchId) {
+  if (!batchId || typeof batchId !== "string") {
+    throw new HttpError(400, "batchId is required");
+  }
+
+  const batch = await getPayrollExportBatchById(batchId);
+  if (!batch) throw new HttpError(404, "Payroll export batch not found");
+  return batch;
+}
+
+export async function createAdminPayrollExportBatch(filters, actor) {
+  if (!actor?.id) throw new HttpError(401, "Admin user is required");
+
+  const rows = await getFilteredTimesheetRows({
+    ...filters,
+    page: 1,
+    limit: MAX_PAGE_LIMIT * 100,
+  });
+  const exportRows = rows.filter(isEligibleForPayrollExport);
+
+  if (exportRows.length === 0) {
+    throw new HttpError(409, "No payroll-approved shifts are available in the current filtered view");
+  }
+
+  const csvContent = buildCsvFromRows(exportRows);
+  const batch = await createPayrollExportBatch({
+    actorUserId: actor.id,
+    filters: sanitizeExportFilters(filters),
+    rows: exportRows,
+    csvContent,
+  });
+
+  const userIndex = await buildUserIndex();
+  return enrichPayrollExportBatch(batch, userIndex);
+}
+
 /**
  * Returns full detail for a single shift: the timesheet row + all raw action logs.
  */
@@ -633,10 +709,5 @@ export async function buildTimesheetsCsv(filters) {
     rowCount: timesheets.length,
   });
 
-  const header = CSV_COLUMNS.map((c) => escapeCsvCell(c.header)).join(",");
-  const rows = timesheets.map((row) =>
-    CSV_COLUMNS.map((c) => escapeCsvCell(row[c.key])).join(",")
-  );
-
-  return [header, ...rows].join("\r\n");
+  return buildCsvFromRows(timesheets);
 }

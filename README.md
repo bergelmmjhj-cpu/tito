@@ -12,6 +12,7 @@ First working version of a worker time clock flow for hotel staff.
 - Worker self-signup (first name, last name, email, password, optional phone)
 - Admin workplace management (create, edit, activate/deactivate)
 - Admin timesheet review, payroll approval, and payroll export tracking
+- Immutable payroll export batches with stored CSV snapshots
 - Time clock page with live status and actions (clock in, break start/end, clock out)
 - Browser geolocation capture on every attendance action (clock in, break start/end, clock out)
 - Per-action location history (coordinates, accuracy, location capture timestamp)
@@ -225,6 +226,9 @@ The app initializes and migrates a local JSON database at startup.
     - `longitude`
     - `accuracy`
     - `capturedAt`
+- `payrollExportBatches[]`
+  - `id`, `createdBy`, `createdAt`, `shiftCount`, `totalPayableHours`
+  - `filters`, `shiftIds`, `rows`, `csvContent`, `fileName`
 
 `timestamp` is the attendance action server timestamp, while `location.capturedAt` is the client geolocation capture time.
 
@@ -288,9 +292,17 @@ Migration logic lives in:
 |--------|------|------|-------------|
 | `GET` | `/api/admin/timesheets` | query `dateFrom`, `dateTo`, `search`, `workplaceId`, `status`, `payrollStatus`, `page`, `limit` | List business-date timesheets with review and payroll state |
 | `GET` | `/api/admin/timesheets/:shiftId` | - | Get detailed shift history, review metadata, and payroll metadata |
-| `PATCH` | `/api/admin/timesheets/:shiftId/resolve` | `{ "reviewStatus", "payrollStatus", "reviewNote", "closeOpenShiftAt?", "closeActiveBreakAt?", "payableHours?" }` | Resolve exceptions, set payroll state, and create audit entries |
+| `PATCH` | `/api/admin/timesheets/:shiftId/resolve` | `{ "reviewStatus", "payrollStatus", "reviewNote", "closeOpenShiftAt?", "closeActiveBreakAt?", "payableHours?" }` | Resolve exceptions, move shifts between `pending` and `approved`, and create audit entries |
 | `GET` | `/api/admin/timesheets/summary/payroll` | same filters as list | Return filtered payroll readiness and approved/exported totals |
 | `GET` | `/api/admin/timesheets/export/csv` | same filters as list | Export filtered timesheets including payroll approval/export columns |
+
+### Payroll export batches (admin only)
+
+| Method | Path | Body | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/admin/payroll-exports` | query `limit?` | List recent immutable payroll export batches |
+| `POST` | `/api/admin/payroll-exports` | `{ "filters": { ...timesheetFilters } }` | Create a payroll export batch from the current approved, closed, reviewed shifts in view |
+| `GET` | `/api/admin/payroll-exports/:batchId/csv` | - | Download the stored CSV snapshot for a payroll export batch |
 
 ### Legacy compatibility routes
 
@@ -339,7 +351,7 @@ Existing v1 routes are still available:
 
 - Review exceptions from the `Timesheets` screen using business-date filters.
 - Mark a closed, reviewed shift as `Approved for payroll` when it is ready to leave operations review.
-- Mark an already approved shift as `Exported to payroll` after it is sent to payroll.
+- Create a payroll export batch from the approved shifts currently in view; this stores the exact exported CSV snapshot and marks those shifts as `Exported`.
 - Revert a shift to `Pending` if payroll needs it reopened; the audit trail records each transition.
 
 ## CRM and geofencing readiness

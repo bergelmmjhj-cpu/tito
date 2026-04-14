@@ -105,6 +105,20 @@ async function applySchemaAlterations() {
     `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS payroll_exported_by TEXT REFERENCES users(id) ON DELETE SET NULL`,
     `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS payroll_exported_at TIMESTAMP`,
     `CREATE INDEX IF NOT EXISTS idx_shifts_payroll_status ON shifts(payroll_status)`,
+    `CREATE TABLE IF NOT EXISTS payroll_export_batches (
+      id TEXT PRIMARY KEY,
+      created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+      shift_count INTEGER NOT NULL,
+      total_payable_hours NUMERIC(10, 2) NOT NULL DEFAULT 0,
+      filters JSONB NOT NULL DEFAULT '{}',
+      shift_ids JSONB NOT NULL DEFAULT '[]',
+      rows_snapshot JSONB NOT NULL DEFAULT '[]',
+      csv_content TEXT NOT NULL,
+      file_name TEXT NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_payroll_export_batches_created_at ON payroll_export_batches(created_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_payroll_export_batches_created_by ON payroll_export_batches(created_by)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS uq_shifts_one_open_per_user ON shifts(user_id) WHERE clock_out_at IS NULL`,
     `ALTER TABLE time_logs DROP CONSTRAINT IF EXISTS time_logs_action_type_check`,
     `ALTER TABLE time_logs ADD CONSTRAINT time_logs_action_type_check CHECK (action_type IN ('clock_in', 'break_start', 'break_end', 'clock_out', 'admin_review', 'admin_close_shift', 'admin_end_break', 'admin_payable_adjustment', 'admin_payroll_approved', 'admin_payroll_exported', 'admin_payroll_reopened'))`,
@@ -292,6 +306,30 @@ async function migrateFromJsonIfExists() {
           console.log(`Migrated ${data.timeLogs.length} time logs`);
         }
 
+        if (Array.isArray(data.payrollExportBatches) && data.payrollExportBatches.length > 0) {
+          for (const batch of data.payrollExportBatches) {
+            await client.query(
+              `INSERT INTO payroll_export_batches (
+                id, created_by, shift_count, total_payable_hours, filters, shift_ids, rows_snapshot, csv_content, file_name, created_at
+              ) VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8, $9, $10)
+              ON CONFLICT (id) DO NOTHING`,
+              [
+                batch.id,
+                batch.createdBy || null,
+                typeof batch.shiftCount === "number" ? batch.shiftCount : Array.isArray(batch.shiftIds) ? batch.shiftIds.length : 0,
+                typeof batch.totalPayableHours === "number" ? Number(batch.totalPayableHours.toFixed(2)) : 0,
+                JSON.stringify(batch.filters && typeof batch.filters === "object" ? batch.filters : {}),
+                JSON.stringify(Array.isArray(batch.shiftIds) ? batch.shiftIds : []),
+                JSON.stringify(Array.isArray(batch.rows) ? batch.rows : []),
+                typeof batch.csvContent === "string" ? batch.csvContent : "",
+                batch.fileName || `payroll-export-${String(batch.createdAt || new Date().toISOString()).slice(0, 10)}-${String(batch.id || "batch").slice(0, 8)}.csv`,
+                batch.createdAt || new Date().toISOString(),
+              ]
+            );
+          }
+          console.log(`Migrated ${data.payrollExportBatches.length} payroll export batches`);
+        }
+
         // Migrate user assignments if present
         if (data.users) {
           for (const user of data.users) {
@@ -371,10 +409,11 @@ export async function writeDatabaseToJson(db) {
 
 function createInitialDatabase() {
   return {
-    schemaVersion: 4,
+    schemaVersion: 7,
     users: [],
     workplaces: [],
     shifts: [],
     timeLogs: [],
+    payrollExportBatches: [],
   };
 }
