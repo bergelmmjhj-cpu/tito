@@ -10,6 +10,7 @@ import {
 } from "../models/timeLogModel.js";
 import { buildShiftHourSummary } from "./payableHoursService.js";
 import { HttpError } from "../utils/errors.js";
+import { formatBusinessDate, resolveBusinessTimeZone } from "../utils/time.js";
 
 const LOW_ACCURACY_THRESHOLD_METERS = 50;
 const DEFAULT_PAGE_LIMIT = 50;
@@ -106,10 +107,15 @@ function buildTimesheetRow(shift, user, shiftLogs, workplaceIndex, userIndex = {
 
   const workplaceId =
     resolvedWorkplaceId || geofence?.workplaceId || user?.profile?.assignedWorkplaceId || null;
+  const workplace = workplaceId ? workplaceIndex[workplaceId] || null : null;
   const workplaceName =
     resolvedWorkplaceName ||
     geofence?.workplaceName ||
-    (workplaceId ? workplaceIndex[workplaceId]?.name || null : null);
+    (workplace ? workplace.name || null : null);
+  const businessTimeZone = resolveBusinessTimeZone(
+    shift?.businessTimeZone || geofence?.businessTimeZone || workplace?.timeZone
+  );
+  const businessDate = shift?.businessDate || formatBusinessDate(shift.clockInAt, businessTimeZone);
 
   const summary = buildShiftHourSummary(shift);
   const status = deriveShiftStatus(shift);
@@ -136,7 +142,8 @@ function buildTimesheetRow(shift, user, shiftLogs, workplaceIndex, userIndex = {
     workerName: user?.name || "Unknown",
     workerEmail: user?.email || null,
     workerStaffId: user?.staffId || null,
-    date: shift.clockInAt ? shift.clockInAt.slice(0, 10) : null,
+    date: businessDate,
+    businessTimeZone,
     status,
     clockInAt: shift.clockInAt || null,
     clockOutAt: shift.clockOutAt || null,
@@ -510,7 +517,8 @@ const CSV_COLUMNS = [
   { header: "Worker Name", key: "workerName" },
   { header: "Staff ID", key: "workerStaffId" },
   { header: "Email", key: "workerEmail" },
-  { header: "Date", key: "date" },
+  { header: "Business Date", key: "date" },
+  { header: "Business Time Zone", key: "businessTimeZone" },
   { header: "Status", key: "status" },
   { header: "Clock In", key: "clockInAt" },
   { header: "Clock Out", key: "clockOutAt" },

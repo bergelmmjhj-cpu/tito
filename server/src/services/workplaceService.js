@@ -10,6 +10,7 @@ import {
   listWorkplacesFromCrm,
 } from "../models/crmWorkplaceModel.js";
 import { HttpError } from "../utils/errors.js";
+import { isValidTimeZone } from "../utils/time.js";
 
 function normalizeText(value, label, required = false, maxLen = 120) {
   if (value === undefined || value === null) {
@@ -56,6 +57,19 @@ function validateRadius(radius) {
   return r;
 }
 
+function normalizeOptionalTimeZone(value) {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string") throw new HttpError(400, "timeZone must be a string");
+
+  const clean = value.trim();
+  if (!clean) return null;
+  if (!isValidTimeZone(clean)) {
+    throw new HttpError(400, "timeZone must be a valid IANA time zone, for example America/New_York");
+  }
+
+  return clean;
+}
+
 function normalizeWorkplacePayload(payload, { partial = false } = {}) {
   const required = !partial;
   const name = normalizeText(payload.name, "name", required, 160);
@@ -68,6 +82,7 @@ function normalizeWorkplacePayload(payload, { partial = false } = {}) {
   const contactName = normalizeText(payload.contactName, "contactName", false, 160);
   const contactPhone = normalizeText(payload.contactPhone, "contactPhone", false, 50);
   const contactEmail = normalizeText(payload.contactEmail, "contactEmail", false, 160);
+  const timeZone = normalizeOptionalTimeZone(payload.timeZone);
 
   const hasCoords = payload.latitude !== undefined || payload.longitude !== undefined;
   const hasRadius = payload.geofenceRadiusMeters !== undefined;
@@ -89,6 +104,7 @@ function normalizeWorkplacePayload(payload, { partial = false } = {}) {
     ...(state !== null ? { state } : {}),
     ...(postalCode !== null ? { postalCode } : {}),
     ...(country !== null ? { country } : {}),
+    ...(timeZone !== null ? { timeZone } : {}),
     contactName,
     contactPhone,
     contactEmail,

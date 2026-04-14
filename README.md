@@ -78,6 +78,7 @@ GOOGLE_CLIENT_ID=<optional-google-client-id>
 GOOGLE_CLIENT_SECRET=<optional-google-client-secret>
 GOOGLE_REDIRECT_URI=<optional-google-callback-uri>
 CORS_ALLOWED_ORIGINS=<optional-comma-separated-origin-allowlist>
+BUSINESS_DEFAULT_TIME_ZONE=<optional-iana-time-zone-like-America/New_York>
 ```
 
 Backward-compatible aliases are still supported:
@@ -171,6 +172,7 @@ curl http://localhost:3000/health
 - Set `REQUIRE_ATTENDANCE_LOCATION=false` only if you explicitly want to allow missing location payloads.
 - `ENFORCE_CLOCKIN_GEOFENCE=false` (default): if set to `true`, clock-in is rejected when outside the assigned workplace radius.
 - `CORS_ALLOWED_ORIGINS`: optional comma-separated list of additional origins allowed to call the API in production. Same-origin requests from the deployed app continue to work automatically.
+- `BUSINESS_DEFAULT_TIME_ZONE`: optional fallback IANA time zone used when a workplace does not provide one. This controls how business dates are derived for attendance history and admin timesheets.
 
 ## Signup flow
 
@@ -211,10 +213,10 @@ The app initializes and migrates a local JSON database at startup.
 - `workplaces[]`
   - `id`, `name`, `address`, `city`, `state`, `postalCode`, `country`
   - `contactName`, `contactPhone`, `contactEmail`
-  - `latitude`, `longitude`, `geofenceRadiusMeters`
+  - `latitude`, `longitude`, `geofenceRadiusMeters`, `timeZone`
   - `active`, `crm`, `createdBy`, `createdAt`, `updatedAt`
 - `shifts[]`
-  - `id`, `userId`, `clockInAt`, `clockOutAt`, `breaks[]`
+  - `id`, `userId`, `clockInAt`, `clockOutAt`, `businessDate`, `businessTimeZone`, `breaks[]`
 - `timeLogs[]`
   - `id`, `userId`, `shiftId`, `actionType`, `timestamp`, `notes`
   - `location`:

@@ -35,9 +35,9 @@ export async function createWorkplace(workplace) {
     `INSERT INTO workplaces (
       id, name, address, city, state, postal_code, country,
       contact_name, contact_phone, contact_email,
-      latitude, longitude, geofence_radius_meters, active, crm,
+      latitude, longitude, geofence_radius_meters, time_zone, active, crm,
       created_at, updated_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
     RETURNING *`,
     [
       workplace.id,
@@ -53,6 +53,7 @@ export async function createWorkplace(workplace) {
       workplace.latitude || null,
       workplace.longitude || null,
       workplace.geofenceRadiusMeters || 150,
+      workplace.timeZone || null,
       workplace.active !== false,
       crm,
       workplace.createdAt || new Date().toISOString(),
@@ -125,6 +126,7 @@ function camelToPgColumn(camel) {
     latitude: "latitude",
     longitude: "longitude",
     geofenceRadiusMeters: "geofence_radius_meters",
+    timeZone: "time_zone",
     active: "active",
     crm: "crm",
     createdAt: "created_at",
@@ -150,6 +152,7 @@ function normalizeDbWorkplace(dbRow) {
     latitude: dbRow.latitude || 0,
     longitude: dbRow.longitude || 0,
     geofenceRadiusMeters: dbRow.geofence_radius_meters || 150,
+    timeZone: dbRow.time_zone || null,
     active: dbRow.active !== false,
     crm: dbRow.crm ? (typeof dbRow.crm === "string" ? JSON.parse(dbRow.crm) : dbRow.crm) : {},
     createdAt: dbRow.created_at,

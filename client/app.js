@@ -705,7 +705,7 @@ function renderHistory(history) {
         : "—";
       return `
         <tr>
-          <td data-label="Date">${item.date || "—"}</td>
+          <td data-label="Business Date">${item.date || "—"}</td>
           <td data-label="Workplace">${item.workplaceName || "—"}</td>
           <td data-label="Clock In">${formatDateTime(item.timeIn)}</td>
           <td data-label="Break">${breakSummary}</td>
@@ -1859,7 +1859,8 @@ function renderTimesheetDetail(detail) {
       ${field("Worker", detail.workerName)}
       ${field("Staff ID", detail.workerStaffId)}
       ${field("Email", detail.workerEmail)}
-      ${field("Date", detail.date)}
+      ${field("Business Date", detail.date)}
+      ${field("Business Time Zone", detail.businessTimeZone || "—")}
       ${field("Status", detail.status)}
       ${field("Clock In", formatDateTime(detail.clockInAt))}
       ${field("Clock Out", formatDateTime(detail.clockOutAt))}

@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { query, withClient } from "../db/pool.js";
 import { buildShiftHourSummary } from "../services/payableHoursService.js";
-import { nowIso } from "../utils/time.js";
+import { formatBusinessDate, nowIso, resolveBusinessTimeZone } from "../utils/time.js";
 import { isDatabaseReady, readDatabaseFromJson, writeDatabaseToJson } from "../db/initialization.js";
 import { HttpError } from "../utils/errors.js";
 
@@ -45,6 +45,7 @@ function normalizeGeofence(geofence) {
   return {
     workplaceId: geofence.workplaceId || null,
     workplaceName: geofence.workplaceName || null,
+    businessTimeZone: geofence.businessTimeZone || null,
     radiusMeters:
       typeof geofence.radiusMeters === "number" && Number.isFinite(geofence.radiusMeters)
         ? geofence.radiusMeters
@@ -76,6 +77,8 @@ function normalizeDbShift(dbShift, breaks = []) {
     userId: dbShift.user_id,
     clockInAt: normalizeTimestamp(dbShift.clock_in_at),
     clockOutAt: normalizeTimestamp(dbShift.clock_out_at),
+    businessDate: dbShift.business_date || null,
+    businessTimeZone: dbShift.business_time_zone || null,
     actualHours: toNumberOrNull(dbShift.actual_hours) ?? summary.actualHours,
     payableHours: toNumberOrNull(dbShift.payable_hours) ?? summary.payableHours,
     reviewStatus: dbShift.review_status || null,
@@ -567,8 +570,12 @@ export async function applyAdminShiftResolution(shiftId, actorUserId, resolution
   });
 }
 
-export async function saveClockIn(userId, notes = null, location = null, geofence = null) {
+export async function saveClockIn(userId, notes = null, location = null, geofence = null, businessTimeZone = null) {
   const timestamp = nowIso();
+  const resolvedBusinessTimeZone = resolveBusinessTimeZone(
+    businessTimeZone || geofence?.businessTimeZone || null
+  );
+  const businessDate = formatBusinessDate(timestamp, resolvedBusinessTimeZone);
 
   if (!isDatabaseReady()) {
     const db = await readDatabaseFromJson();
@@ -577,6 +584,8 @@ export async function saveClockIn(userId, notes = null, location = null, geofenc
       userId,
       clockInAt: timestamp,
       clockOutAt: null,
+      businessDate,
+      businessTimeZone: resolvedBusinessTimeZone,
       actualHours: null,
       payableHours: null,
       breaks: [],
@@ -619,9 +628,9 @@ export async function saveClockIn(userId, notes = null, location = null, geofenc
       }
 
       await client.query(
-        `INSERT INTO shifts (id, user_id, clock_in_at, clock_out_at, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6)`,
-        [shiftId, userId, timestamp, null, timestamp, timestamp]
+        `INSERT INTO shifts (id, user_id, clock_in_at, clock_out_at, business_date, business_time_zone, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [shiftId, userId, timestamp, null, businessDate, resolvedBusinessTimeZone, timestamp, timestamp]
       );
 
       await client.query(
@@ -653,6 +662,8 @@ export async function saveClockIn(userId, notes = null, location = null, geofenc
         userId,
         clockInAt: timestamp,
         clockOutAt: null,
+        businessDate,
+        businessTimeZone: resolvedBusinessTimeZone,
         breaks: [],
         createdAt: timestamp,
         updatedAt: timestamp,

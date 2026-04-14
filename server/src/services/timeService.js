@@ -14,6 +14,7 @@ import { listWorkplaces } from "../models/workplaceModel.js";
 import { calculateDistanceMeters } from "./geofenceService.js";
 import { buildShiftHourSummary } from "./payableHoursService.js";
 import { HttpError } from "../utils/errors.js";
+import { formatBusinessDate, getDefaultBusinessTimeZone, resolveBusinessTimeZone } from "../utils/time.js";
 
 const NOTES_MAX_LENGTH = 500; // keep notes concise for UI display and log storage
 const LOCATION_REQUIRED = process.env.REQUIRE_ATTENDANCE_LOCATION !== "false";
@@ -275,6 +276,7 @@ async function evaluateGeofenceForAction(userId, location, actionType) {
       workplaceResolution: "unresolved",
       assignedWorkplaceUsed: false,
       reviewFlag: "assignment_invalid",
+      businessTimeZone: getDefaultBusinessTimeZone(),
       radiusMeters: null,
       distanceMeters: null,
       withinGeofence: null,
@@ -300,6 +302,7 @@ async function evaluateGeofenceForAction(userId, location, actionType) {
           workplaceResolution: "nearest",
           assignedWorkplaceUsed: false,
           reviewFlag: "no_assignment_nearest_used",
+          businessTimeZone: resolveBusinessTimeZone(nearest.workplace.timeZone),
           radiusMeters: nearest.radiusMeters,
           distanceMeters: Number(nearest.distanceMeters.toFixed(2)),
           withinGeofence: nearest.distanceMeters <= nearest.radiusMeters,
@@ -319,6 +322,7 @@ async function evaluateGeofenceForAction(userId, location, actionType) {
       workplaceResolution: "unresolved",
       assignedWorkplaceUsed: false,
       reviewFlag: "no_assignment",
+      businessTimeZone: getDefaultBusinessTimeZone(),
       radiusMeters: null,
       distanceMeters: null,
       withinGeofence: null,
@@ -338,6 +342,7 @@ async function evaluateGeofenceForAction(userId, location, actionType) {
       workplaceResolution: "assigned",
       assignedWorkplaceUsed: true,
       reviewFlag: "assignment_unavailable",
+      businessTimeZone: resolveBusinessTimeZone(assignment.workplace?.timeZone),
       radiusMeters: assignment.workplace?.geofenceRadiusMeters || null,
       distanceMeters: null,
       withinGeofence: null,
@@ -359,6 +364,7 @@ async function evaluateGeofenceForAction(userId, location, actionType) {
       workplaceResolution: "assigned",
       assignedWorkplaceUsed: true,
       reviewFlag: "assignment_invalid",
+      businessTimeZone: resolveBusinessTimeZone(assignment.workplace?.timeZone),
       radiusMeters: null,
       distanceMeters: null,
       withinGeofence: null,
@@ -379,6 +385,7 @@ async function evaluateGeofenceForAction(userId, location, actionType) {
       workplaceResolution: "assigned",
       assignedWorkplaceUsed: true,
       reviewFlag: "missing_location",
+      businessTimeZone: resolveBusinessTimeZone(assignment.workplace.timeZone),
       radiusMeters: normalizedInputs.radiusMeters,
       distanceMeters: null,
       withinGeofence: null,
@@ -404,6 +411,7 @@ async function evaluateGeofenceForAction(userId, location, actionType) {
     workplaceResolution: "assigned",
     assignedWorkplaceUsed: true,
     reviewFlag: withinGeofence ? null : "outside_geofence",
+    businessTimeZone: resolveBusinessTimeZone(assignment.workplace.timeZone),
     radiusMeters,
     distanceMeters: Number(distanceMeters.toFixed(2)),
     withinGeofence,
@@ -481,7 +489,13 @@ export async function performAction(userId, actionType, notes, location) {
       );
     }
 
-    await saveClockIn(userId, cleanNotes, cleanLocation, geofenceEvaluation);
+    await saveClockIn(
+      userId,
+      cleanNotes,
+      cleanLocation,
+      geofenceEvaluation,
+      geofenceEvaluation.businessTimeZone || getDefaultBusinessTimeZone()
+    );
   } else if (normalizedAction === "break_start") {
     if (!openShift) {
       console.warn("[performAction] rejected", { ...logCtx, reason: "not_clocked_in" });
@@ -580,7 +594,9 @@ export async function getAttendanceHistory(userId) {
 
     return {
       shiftId: shift.id,
-      date: shift.clockInAt ? new Date(shift.clockInAt).toISOString().slice(0, 10) : null,
+      date:
+        shift.businessDate ||
+        formatBusinessDate(shift.clockInAt, shift.businessTimeZone || clockInLog?.geofence?.businessTimeZone),
       status: deriveShiftStatus(shift),
       timeIn: shift.clockInAt || null,
       breakStart,
@@ -592,6 +608,11 @@ export async function getAttendanceHistory(userId) {
       totalHours: summary.actualHours,
       totalMinutes: summary.workedMinutes,
       breakMinutes: summary.breakMinutes,
+      businessTimeZone: resolveBusinessTimeZone(
+        shift.businessTimeZone ||
+          clockInLog?.geofence?.businessTimeZone ||
+          getDefaultBusinessTimeZone()
+      ),
       workplaceName,
       workplaceResolution: clockInLog?.geofence?.workplaceResolution || "unresolved",
       workplaceReviewFlag: clockInLog?.geofence?.reviewFlag || null,

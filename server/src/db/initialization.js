@@ -90,6 +90,9 @@ async function applySchemaAlterations() {
     `CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id)`,
     `ALTER TABLE users ALTER COLUMN password_salt DROP NOT NULL`,
     `ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL`,
+    `ALTER TABLE workplaces ADD COLUMN IF NOT EXISTS time_zone VARCHAR(100)`,
+    `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS business_date VARCHAR(10)`,
+    `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS business_time_zone VARCHAR(100)`,
     `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS actual_hours NUMERIC(10, 2)`,
     `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS payable_hours NUMERIC(10, 2)`,
     `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS review_status VARCHAR(50)`,
@@ -172,9 +175,9 @@ async function migrateFromJsonIfExists() {
               `INSERT INTO workplaces (
                 id, name, address, city, state, postal_code, country,
                 contact_name, contact_phone, contact_email,
-                latitude, longitude, geofence_radius_meters, active, crm,
+                latitude, longitude, geofence_radius_meters, time_zone, active, crm,
                 created_at, updated_at
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
               ON CONFLICT (id) DO NOTHING`,
               [
                 wp.id,
@@ -190,6 +193,7 @@ async function migrateFromJsonIfExists() {
                 wp.latitude || null,
                 wp.longitude || null,
                 wp.geofenceRadiusMeters || 150,
+                wp.timeZone || null,
                 wp.active !== false,
                 JSON.stringify(wp.crm || {}),
                 wp.createdAt || new Date().toISOString(),
@@ -206,14 +210,16 @@ async function migrateFromJsonIfExists() {
             const summary = buildShiftHourSummary(shift);
             await client.query(
               `INSERT INTO shifts (
-                id, user_id, clock_in_at, clock_out_at, actual_hours, payable_hours, created_at, updated_at
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                id, user_id, clock_in_at, clock_out_at, business_date, business_time_zone, actual_hours, payable_hours, created_at, updated_at
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
               ON CONFLICT (id) DO NOTHING`,
               [
                 shift.id,
                 shift.userId,
                 shift.clockInAt,
                 shift.clockOutAt || null,
+                shift.businessDate || null,
+                shift.businessTimeZone || null,
                 shift.actualHours ?? summary.actualHours,
                 shift.payableHours ?? summary.payableHours,
                 shift.createdAt || new Date().toISOString(),

@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { createPasswordHash } from "../utils/password.js";
 import { buildShiftHourSummary } from "../services/payableHoursService.js";
 
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 const DEFAULT_BOOTSTRAP_ADMIN = {
   firstName: "System",
@@ -191,6 +191,7 @@ export function migrateDatabase(db) {
     state: item.state || "",
     postalCode: item.postalCode || "",
     country: item.country || "",
+    timeZone: typeof item.timeZone === "string" && item.timeZone.trim() ? item.timeZone.trim() : null,
     contactName: item.contactName || null,
     contactPhone: item.contactPhone || null,
     contactEmail: item.contactEmail || null,
@@ -228,6 +229,14 @@ export function migrateDatabase(db) {
 
     return {
       ...normalizedShift,
+      businessDate:
+        typeof shift.businessDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(shift.businessDate)
+          ? shift.businessDate
+          : null,
+      businessTimeZone:
+        typeof shift.businessTimeZone === "string" && shift.businessTimeZone.trim()
+          ? shift.businessTimeZone.trim()
+          : null,
       actualHours:
         typeof shift.actualHours === "number" && Number.isFinite(shift.actualHours)
           ? shift.actualHours
@@ -274,6 +283,10 @@ export function migrateDatabase(db) {
             workplaceName:
               typeof geofence.workplaceName === "string" && geofence.workplaceName.trim()
                 ? geofence.workplaceName
+                : null,
+            businessTimeZone:
+              typeof geofence.businessTimeZone === "string" && geofence.businessTimeZone.trim()
+                ? geofence.businessTimeZone.trim()
                 : null,
             radiusMeters:
               typeof geofence.radiusMeters === "number" && Number.isFinite(geofence.radiusMeters)

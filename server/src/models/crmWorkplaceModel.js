@@ -33,6 +33,13 @@ function normalizeDbWorkplace(dbRow) {
     state: pickFirst(dbRow.state, dbRow.province, dbRow.region, dbRow.state_name),
     postalCode: dbRow.postal_code || "",
     country: pickFirst(dbRow.country, dbRow.country_name, dbRow.country_code),
+    timeZone: pickFirst(
+      dbRow.time_zone,
+      dbRow.timezone,
+      dbRow.tz,
+      dbRow.iana_time_zone,
+      dbRow.iana_timezone
+    ) || null,
     contactName: dbRow.contact_name || null,
     contactPhone: dbRow.contact_phone || null,
     contactEmail: dbRow.contact_email || null,
