@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>TITO Time Clock</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <link rel="stylesheet" href="./worker.css" />
+</head>
+<body>
+  <div class="page">
+
+    <!-- Header -->
+    <header class="header">
+      <div>
+        <div class="header-title">TITO Time Clock</div>
+        <div class="header-name" id="workerName">Loading...</div>
+      </div>
+      <button id="logoutBtn" class="btn-logout" type="button">Log Out</button>
+    </header>
+
+    <!-- Feedback -->
+    <div id="actionFeedback" class="action-feedback hidden" role="alert"></div>
+
+    <!-- Clock Status Panel -->
+    <section class="clock-panel">
+      <div class="live-clock" id="liveClock">—</div>
+      <div class="status-label" id="statusLabel">Loading...</div>
+      <p class="workplace-line" id="workplaceLine">Detecting hotel...</p>
+    </section>
+
+    <!-- Action Buttons -->
+    <section class="action-buttons">
+      <button id="clockInBtn"  class="btn-action btn-clock-in  hidden" type="button" disabled>Clock In</button>
+      <button id="breakBtn"    class="btn-action btn-break     hidden" type="button">Start Break</button>
+      <button id="endBreakBtn" class="btn-action btn-end-break hidden" type="button">End Break</button>
+      <button id="clockOutBtn" class="btn-action btn-clock-out hidden" type="button">Clock Out</button>
+    </section>
+
+    <!-- Location -->
+    <section class="location-panel" id="locationSection">
+      <div class="location-header">
+        <span class="location-title">Your Location</span>
+        <button id="locRefreshBtn" class="btn-location" type="button">Refresh Location</button>
+      </div>
+      <p class="location-status" id="locStatus">Checking location...</p>
+      <p class="location-hint" id="locHint"></p>
+      <div id="locationMap" class="hidden"></div>
+      <div id="mapPlaceholder" class="map-placeholder">Location not captured yet</div>
+    </section>
+
+    <!-- Attendance History -->
+    <section class="history-panel">
+      <div class="history-header">
+        <span class="history-title">My Attendance History</span>
+        <button id="refreshHistoryBtn" class="btn-refresh" type="button">Refresh</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="history-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Hotel</th>
+              <th>Clock In</th>
+              <th>Breaks</th>
+              <th>Clock Out</th>
+              <th>Hours</th>
+            </tr>
+          </thead>
+          <tbody id="historyBody">
+            <tr><td colspan="6" class="muted">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="./worker-clock.js"></script>
+</body>
+</html>

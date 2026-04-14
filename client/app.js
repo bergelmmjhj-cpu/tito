@@ -1365,17 +1365,9 @@ async function login() {
 
   authToken = data.token;
   localStorage.setItem(TOKEN_KEY, authToken);
-  setLoggedInState();
-  await Promise.all([loadStatus(), loadHistory()]);
-
-  if (currentUser?.role === "admin") {
-    openScreen("users");
-    await loadAdminUsers();
-    return;
-  }
-
-  openScreen("time");
-  await requestLocationForTimeClock("worker_login");
+  const status = await apiFetch("/api/time/status");
+  const role = status?.user?.role || "worker";
+  window.location.replace(role === "admin" ? "/admin/" : "/worker/");
 }
 
 function startGoogleLogin() {
@@ -1472,10 +1464,7 @@ async function signup() {
 
   authToken = data.token;
   localStorage.setItem(TOKEN_KEY, authToken);
-  setLoggedInState();
-  openScreen("time");
-  await Promise.all([loadStatus(), loadHistory()]);
-  await requestLocationForTimeClock("worker_signup");
+  window.location.replace("/worker/");
 }
 
 async function handleWorkplaceFormSubmit(event) {
@@ -1519,24 +1508,9 @@ async function initFromSession() {
   }
 
   try {
-    await loadStatus();
-    setLoggedInState();
-
-    // Keep session active even if history endpoint is temporarily unavailable.
-    loadHistory().catch((error) => {
-      console.warn("Failed to load shift history during session restore:", error.message);
-    });
-
-    if (currentUser?.role === "admin") {
-      openScreen("users");
-      loadAdminUsers().catch((error) => {
-        console.warn("Failed to load admin users during session restore:", error.message);
-      });
-      return;
-    }
-
-    openScreen("time");
-    await requestLocationForTimeClock("session_restore");
+    const status = await apiFetch("/api/time/status");
+    const role = status?.user?.role || "worker";
+    window.location.replace(role === "admin" ? "/admin/" : "/worker/");
   } catch (error) {
       setLoggedOutState();
     setError(loginErrorEl, `Session could not be restored: ${error.message}`);

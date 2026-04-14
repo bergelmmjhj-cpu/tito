@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>TITO — Workforce Management</title>
+  <link rel="stylesheet" href="./admin.css" />
+</head>
+<body>
+
+<!-- ── Top Navigation ──────────────────────────────────────────────────────── -->
+<nav class="topnav" role="navigation">
+  <span class="topnav-brand">TITO Admin</span>
+
+  <button class="nav-tab active" data-tab="dashboard"   type="button">Dashboard</button>
+  <button class="nav-tab"        data-tab="staff"        type="button">Staff</button>
+  <button class="nav-tab"        data-tab="timesheets"   type="button">Timesheets</button>
+  <button class="nav-tab"        data-tab="hotels"       type="button">Hotels</button>
+  <button class="nav-tab danger-tab" data-tab="exceptions" type="button">⚠ Shifts That Need Review</button>
+  <button class="nav-tab"        data-tab="reports"      type="button">Reports</button>
+
+  <span class="nav-spacer"></span>
+  <span class="nav-admin-name" id="adminName"></span>
+  <button id="logoutBtn" class="btn-nav-logout" type="button">Log Out</button>
+</nav>
+
+<!-- ── Main Content ────────────────────────────────────────────────────────── -->
+<main class="main">
+
+  <!-- ══ DASHBOARD ══════════════════════════════════════════════════════════ -->
+  <section class="tab-panel active" id="tab-dashboard">
+    <div class="page-title">Workforce Management Dashboard</div>
+    <p class="page-subtitle" id="dashboardTimestamp">Loading stats...</p>
+
+    <div id="dashboardMsg" class="msg hidden"></div>
+
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Active Staff</div>
+        <div class="kpi-value primary" id="kpiActiveStaff">—</div>
+        <div class="kpi-meta">Workers with active accounts</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Currently Clocked In</div>
+        <div class="kpi-value success" id="kpiClockedIn">—</div>
+        <div class="kpi-meta">Staff on shift right now</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Open Shifts</div>
+        <div class="kpi-value warning" id="kpiOpenShifts">—</div>
+        <div class="kpi-meta">Shifts not yet clocked out</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Missing Clock Outs</div>
+        <div class="kpi-value danger" id="kpiMissingClockOut">—</div>
+        <div class="kpi-meta">Open longer than 8 hours</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Shifts That Need Review</div>
+        <div class="kpi-value danger" id="kpiExceptions">—</div>
+        <div class="kpi-meta">Exceptions found today</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Hotels / Workplaces</div>
+        <div class="kpi-value" id="kpiHotels">—</div>
+        <div class="kpi-meta">Active locations in system</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Hours Today</div>
+        <div class="kpi-value primary" id="kpiHoursToday">—</div>
+        <div class="kpi-meta">Total staff hours logged today</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Hours This Week</div>
+        <div class="kpi-value primary" id="kpiHoursWeek">—</div>
+        <div class="kpi-meta">Total staff hours this week</div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px">
+      <button class="btn-ghost" id="refreshDashboardBtn" type="button">Refresh Stats</button>
+      <button class="btn-ghost" data-tab="exceptions" type="button">View Shifts That Need Review →</button>
+    </div>
+  </section>
+
+  <!-- ══ STAFF ══════════════════════════════════════════════════════════════ -->
+  <section class="tab-panel" id="tab-staff">
+    <div class="page-title">Staff Accounts</div>
+    <p class="page-subtitle">Create and manage who can use the app.</p>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Add New Staff Account</span>
+      </div>
+      <div id="createUserMsg" class="msg hidden"></div>
+      <form id="createUserForm">
+        <div class="form-grid-2">
+          <label>First Name <input name="firstName" type="text" required autocomplete="off" /></label>
+          <label>Last Name  <input name="lastName"  type="text" required autocomplete="off" /></label>
+          <label>Email      <input name="email"     type="email" required autocomplete="off" /></label>
+          <label>Staff ID   <input name="staffId"   type="text" required autocomplete="off" /></label>
+          <label>Password   <input name="password"        type="password" minlength="8" required autocomplete="new-password" /></label>
+          <label>Confirm Password <input name="confirmPassword" type="password" minlength="8" required autocomplete="new-password" /></label>
+          <label>Role
+            <select name="role">
+              <option value="worker">Worker</option>
+              <option value="admin">Admin</option>
+            </select>
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn">Create Account</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">All Staff</span>
+        <button id="refreshUsersBtn" class="btn-ghost" type="button">Refresh</button>
+      </div>
+      <div id="usersMsg" class="msg hidden"></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Name</th><th>Email</th><th>Staff ID</th><th>Role</th>
+            <th>Created</th><th>Status</th><th>Actions</th>
+          </tr></thead>
+          <tbody id="usersBody">
+            <tr class="loading-row"><td colspan="7">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ TIMESHEETS ═════════════════════════════════════════════════════════ -->
+  <section class="tab-panel" id="tab-timesheets">
+    <div class="page-title">Staff Timesheets</div>
+    <p class="page-subtitle">Review hours, approve shifts, and create payroll exports.</p>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Filters</span>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button id="tsExportCsvBtn"        class="btn-ghost" type="button">Export CSV</button>
+          <button id="createPayrollExportBtn" class="btn"      type="button">Create Payroll Export</button>
+          <button id="tsRefreshBtn"           class="btn-ghost" type="button">Refresh</button>
+        </div>
+      </div>
+      <div class="filter-bar">
+        <label>Date From   <input id="tsDateFrom" type="date" /></label>
+        <label>Date To     <input id="tsDateTo"   type="date" /></label>
+        <label>Search Name <input id="tsSearch"   type="text" placeholder="Name, email or staff ID" /></label>
+        <label>Hotel
+          <select id="tsWorkplace"><option value="">All hotels</option></select>
+        </label>
+        <label>Status
+          <select id="tsStatus">
+            <option value="">All statuses</option>
+            <option value="open_shift">Open Shift</option>
+            <option value="completed">Completed</option>
+            <option value="missing_break_end">Missing Break End</option>
+          </select>
+        </label>
+        <label>Payroll
+          <select id="tsPayroll">
+            <option value="">All</option>
+            <option value="pending">Pending</option>
+            <option value="approved">Approved</option>
+            <option value="exported">Exported</option>
+          </select>
+        </label>
+        <div class="filter-bar" style="align-items:flex-end;padding-top:20px">
+          <button id="tsApplyBtn" class="btn"       type="button">Apply</button>
+          <button id="tsClearBtn" class="btn-ghost" type="button">Clear</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="tsMsg" class="msg hidden"></div>
+
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Worker</th><th>Date</th><th>Hotel</th><th>Clock In</th><th>Clock Out</th>
+            <th>Hours</th><th>Status</th><th>Payroll</th><th>Attention</th><th>Note</th>
+          </tr></thead>
+          <tbody id="tsBody">
+            <tr class="loading-row"><td colspan="10">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="tsPagination"></div>
+    </div>
+
+    <!-- Shift Detail -->
+    <div id="tsDetailPanel" class="detail-panel hidden">
+      <div class="card-header">
+        <span class="card-title">Shift Detail</span>
+        <button id="closeDetailBtn" class="btn-ghost" type="button">✕ Close</button>
+      </div>
+      <div id="tsDetailMsg" class="msg hidden"></div>
+      <div id="tsDetailContent"></div>
+    </div>
+
+    <!-- Payroll Exports -->
+    <div class="card" style="margin-top:20px">
+      <div class="card-header">
+        <span class="card-title">Recent Payroll Exports</span>
+      </div>
+      <div id="payrollMsg" class="msg hidden"></div>
+      <div id="payrollExportList"><p class="muted">No payroll exports yet.</p></div>
+    </div>
+  </section>
+
+  <!-- ══ HOTELS ═════════════════════════════════════════════════════════════ -->
+  <section class="tab-panel" id="tab-hotels">
+    <div class="page-title">Hotels &amp; Workplaces</div>
+    <p class="page-subtitle">Locations are loaded from the CRM system (read-only). Assign workers below.</p>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Hotel Locations</span>
+        <button id="refreshWorkplacesBtn" class="btn-ghost" type="button">Refresh</button>
+      </div>
+      <div id="workplacesMsg" class="msg hidden"></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Name</th><th>City / Region</th><th>Coordinates</th>
+            <th>Geofence Radius</th><th>Time Zone</th><th>Status</th><th>Assigned Workers</th>
+          </tr></thead>
+          <tbody id="workplacesBody">
+            <tr class="loading-row"><td colspan="7">Loading hotels...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Assign Worker to Hotel</span>
+        <button id="refreshAssignmentsBtn" class="btn-ghost" type="button">Refresh</button>
+      </div>
+      <p class="muted" style="margin-bottom:14px">When a worker is assigned to a hotel, clock-in checks will use that hotel's geofence. If no assignment exists, the nearest hotel is used automatically.</p>
+      <div id="assignMsg" class="msg hidden"></div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px">
+        <label style="flex:1;min-width:200px">Worker
+          <select id="assignWorker"><option value="">— select worker —</option></select>
+        </label>
+        <label style="flex:1;min-width:200px">Hotel
+          <select id="assignWorkplace"><option value="">— Unassigned —</option></select>
+        </label>
+        <div style="padding-bottom:0">
+          <button id="saveAssignmentBtn" class="btn" type="button">Save Assignment</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Worker</th><th>Email</th><th>Assigned Hotel</th><th>Status</th></tr></thead>
+          <tbody id="assignmentsBody">
+            <tr class="loading-row"><td colspan="4">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ EXCEPTIONS ═════════════════════════════════════════════════════════ -->
+  <section class="tab-panel" id="tab-exceptions">
+    <div class="page-title">Shifts That Need Review</div>
+    <p class="page-subtitle">Resolve missing clock-outs, location flags, and other issues below.</p>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title" id="exCount">Loading...</span>
+        <div style="display:flex;gap:8px">
+          <button id="exRefreshBtn" class="btn-ghost" type="button">Refresh</button>
+        </div>
+      </div>
+      <div class="filter-bar">
+        <label>Date From  <input id="exDateFrom" type="date" /></label>
+        <label>Date To    <input id="exDateTo"   type="date" /></label>
+        <label>Search     <input id="exSearch"   type="text" placeholder="Name or staff ID" /></label>
+        <label>Issue Type
+          <select id="exStatus">
+            <option value="">All issues</option>
+            <option value="open_shift">Missing Clock Out</option>
+            <option value="missing_break_end">Missing Break End</option>
+            <option value="outside_geofence">Outside Hotel Area</option>
+            <option value="no_location">No Location</option>
+            <option value="workplace_unresolved">Hotel Not Detected</option>
+          </select>
+        </label>
+        <div class="filter-bar" style="align-items:flex-end;padding-top:20px">
+          <button id="exApplyBtn" class="btn"       type="button">Apply</button>
+          <button id="exClearBtn" class="btn-ghost" type="button">Clear</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="exMsg" class="msg hidden"></div>
+
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Worker</th><th>Date</th><th>Hotel</th><th>Clock In</th>
+            <th>Clock Out</th><th>Hours</th><th>Issue</th><th>Action</th>
+          </tr></thead>
+          <tbody id="exBody">
+            <tr class="loading-row"><td colspan="8">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="exPagination"></div>
+    </div>
+
+    <!-- Exception Detail -->
+    <div id="exDetailPanel" class="detail-panel hidden">
+      <div class="card-header">
+        <span class="card-title">Resolve Exception</span>
+        <button id="closeExDetailBtn" class="btn-ghost" type="button">✕ Close</button>
+      </div>
+      <div id="exDetailMsg" class="msg hidden"></div>
+      <div id="exDetailContent"></div>
+    </div>
+  </section>
+
+  <!-- ══ REPORTS ════════════════════════════════════════════════════════════ -->
+  <section class="tab-panel" id="tab-reports">
+    <div class="page-title">Reports &amp; Exports</div>
+    <p class="page-subtitle">Download shift data, payroll files, and hours summaries as CSV files.</p>
+
+    <div class="card" style="max-width:500px;margin-bottom:24px">
+      <div class="card-title" style="margin-bottom:12px">Date Range (optional)</div>
+      <div class="form-grid-2">
+        <label>From <input id="rptDateFrom" type="date" /></label>
+        <label>To   <input id="rptDateTo"   type="date" /></label>
+      </div>
+    </div>
+
+    <div id="rptMsg" class="msg hidden" style="max-width:600px;margin-bottom:16px"></div>
+
+    <div class="report-grid">
+      <div class="report-card">
+        <div class="report-title">Daily Attendance</div>
+        <div class="report-desc">All clock-in/out records for the selected date range. Includes worker name, hotel, times, and hours.</div>
+        <button id="rptDailyBtn" class="btn" type="button">Download CSV</button>
+      </div>
+      <div class="report-card">
+        <div class="report-title">Payroll Export</div>
+        <div class="report-desc">Approved shifts ready for payroll. Creates an immutable export batch and downloads it as a file.</div>
+        <button id="rptPayrollBtn" class="btn" type="button">Create &amp; Download</button>
+      </div>
+      <div class="report-card">
+        <div class="report-title">Worker Hours Summary</div>
+        <div class="report-desc">Total hours per worker for the date range. Use this for weekly or monthly summaries.</div>
+        <button id="rptWorkerBtn" class="btn" type="button">Download CSV</button>
+      </div>
+      <div class="report-card">
+        <div class="report-title">Hotel Hours Summary</div>
+        <div class="report-desc">Total staff hours per hotel location for the date range.</div>
+        <button id="rptHotelBtn" class="btn" type="button">Download CSV</button>
+      </div>
+    </div>
+  </section>
+
+</main>
+<!-- Tab-specific modules — load after the inline helpers above -->
+<script src="./admin-dashboard.js"></script>
+<script src="./admin-users.js"></script>
+<script src="./admin-timesheets.js"></script>
+<script src="./admin-workplaces.js"></script>
+<script src="./admin-exceptions.js"></script>
+<script src="./admin-reports.js"></script>
+
+<script>
+// ── Tab navigation ────────────────────────────────────────────────────────
+const NAV_TABS = document.querySelectorAll(".nav-tab[data-tab]");
+const TAB_PANELS = document.querySelectorAll(".tab-panel[id^='tab-']");
+let activeTab = "dashboard";
+
+function openTab(tabName) {
+  activeTab = tabName;
+  NAV_TABS.forEach((t) => t.classList.toggle("active", t.dataset.tab === tabName));
+  TAB_PANELS.forEach((p) => p.classList.toggle("active", p.id === `tab-${tabName}`));
+}
+
+NAV_TABS.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    openTab(btn.dataset.tab);
+    // Lazy-load tabs on first open
+    if (btn.dataset.tab === "staff"      && typeof initUsersTab      === "function" && !btn.dataset.loaded) { initUsersTab();      btn.dataset.loaded = "1"; }
+    if (btn.dataset.tab === "timesheets" && typeof initTimesheetsTab === "function" && !btn.dataset.loaded) { initTimesheetsTab(); btn.dataset.loaded = "1"; }
+    if (btn.dataset.tab === "hotels"     && typeof initWorkplacesTab === "function" && !btn.dataset.loaded) { initWorkplacesTab(); btn.dataset.loaded = "1"; }
+    if (btn.dataset.tab === "exceptions" && typeof initExceptionsTab === "function" && !btn.dataset.loaded) { initExceptionsTab(); btn.dataset.loaded = "1"; }
+    if (btn.dataset.tab === "reports"    && typeof initReportsTab    === "function" && !btn.dataset.loaded) { initReportsTab();    btn.dataset.loaded = "1"; }
+  });
+});
+
+// Also allow dashboard quick links to open tabs
+document.querySelectorAll("button[data-tab]:not(.nav-tab)").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const tab = btn.dataset.tab;
+    openTab(tab);
+    const navBtn = document.querySelector(`.nav-tab[data-tab="${tab}"]`);
+    if (navBtn && !navBtn.dataset.loaded) navBtn.click();
+  });
+});
+
+// ── Logout ────────────────────────────────────────────────────────────────
+document.getElementById("logoutBtn")?.addEventListener("click", async () => {
+  try { await apiFetch("/api/auth/logout", { method: "POST" }); } catch {}
+  localStorage.removeItem(TOKEN_KEY);
+  window.location.replace("/");
+});
+
+// ── Dashboard refresh ─────────────────────────────────────────────────────
+document.getElementById("refreshDashboardBtn")?.addEventListener("click", loadDashboard);
+
+// ── Init ──────────────────────────────────────────────────────────────────
+(async function init() {
+  const user = await requireAdminAuth();
+  if (!user) return;
+
+  const nameEl = document.getElementById("adminName");
+  if (nameEl) nameEl.textContent = user.name || "Admin";
+
+  // Load dashboard immediately (it's visible by default)
+  await loadDashboard();
+
+  // Auto-refresh dashboard every 60 seconds
+  setInterval(loadDashboard, 60000);
+})();
+</script>
+
+</body>
+</html>
