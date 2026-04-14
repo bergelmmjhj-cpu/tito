@@ -92,7 +92,13 @@ async function applySchemaAlterations() {
     `ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL`,
     `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS actual_hours NUMERIC(10, 2)`,
     `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS payable_hours NUMERIC(10, 2)`,
+    `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS review_status VARCHAR(50)`,
+    `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS review_note TEXT`,
+    `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS reviewed_by TEXT REFERENCES users(id) ON DELETE SET NULL`,
+    `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP`,
     `CREATE UNIQUE INDEX IF NOT EXISTS uq_shifts_one_open_per_user ON shifts(user_id) WHERE clock_out_at IS NULL`,
+    `ALTER TABLE time_logs DROP CONSTRAINT IF EXISTS time_logs_action_type_check`,
+    `ALTER TABLE time_logs ADD CONSTRAINT time_logs_action_type_check CHECK (action_type IN ('clock_in', 'break_start', 'break_end', 'clock_out', 'admin_review', 'admin_close_shift', 'admin_end_break', 'admin_payable_adjustment'))`,
   ];
 
   for (const sql of alterations) {

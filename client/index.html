@@ -299,6 +299,9 @@
               <option value="no_location">No location</option>
               <option value="outside_geofence">Outside workplace area</option>
               <option value="workplace_unresolved">Workplace unresolved</option>
+              <option value="pending_review">Pending review</option>
+              <option value="reviewed">Reviewed</option>
+              <option value="follow_up_required">Follow-up required</option>
               <option value="low_accuracy">Low accuracy (&gt;50 m)</option>
             </select>
           </label>
@@ -335,6 +338,7 @@
             <h3>Shift Detail</h3>
             <button id="closeTimesheetDetailBtn" type="button" class="ghost">✕ Close</button>
           </div>
+          <p id="timesheetActionMessage" class="action-feedback hidden"></p>
           <div id="timesheetDetailContent" class="detail-content"></div>
         </div>
       </section>

@@ -77,6 +77,10 @@ const CREATE_TABLES_SQL = `
     clock_out_at TIMESTAMP,
     actual_hours NUMERIC(10, 2),
     payable_hours NUMERIC(10, 2),
+    review_status VARCHAR(50),
+    review_note TEXT,
+    reviewed_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    reviewed_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
@@ -101,7 +105,7 @@ const CREATE_TABLES_SQL = `
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     shift_id TEXT NOT NULL REFERENCES shifts(id) ON DELETE CASCADE,
-    action_type VARCHAR(50) NOT NULL CHECK (action_type IN ('clock_in', 'break_start', 'break_end', 'clock_out')),
+    action_type VARCHAR(50) NOT NULL CHECK (action_type IN ('clock_in', 'break_start', 'break_end', 'clock_out', 'admin_review', 'admin_close_shift', 'admin_end_break', 'admin_payable_adjustment')),
     timestamp TIMESTAMP NOT NULL,
     location JSONB,
     geofence JSONB,

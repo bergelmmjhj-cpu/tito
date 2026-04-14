@@ -1,13 +1,21 @@
 import { listUsers } from "../models/userModel.js";
-import { listWorkplaces, findWorkplaceById } from "../models/workplaceModel.js";
+import { listWorkplaces } from "../models/workplaceModel.js";
 import { listWorkplacesFromCrm } from "../models/crmWorkplaceModel.js";
-import { getAllShifts, getAllTimeLogs } from "../models/timeLogModel.js";
+import {
+  applyAdminShiftResolution,
+  getAllShifts,
+  getAllTimeLogs,
+  getShiftById,
+  getTimeLogsForShift,
+} from "../models/timeLogModel.js";
 import { buildShiftHourSummary } from "./payableHoursService.js";
 import { HttpError } from "../utils/errors.js";
 
 const LOW_ACCURACY_THRESHOLD_METERS = 50;
 const DEFAULT_PAGE_LIMIT = 50;
 const MAX_PAGE_LIMIT = 200;
+const REVIEW_STATUSES = new Set(["reviewed", "follow_up_required"]);
+const ADMIN_REVIEW_NOTE_MAX_LENGTH = 1000;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -18,6 +26,10 @@ function deriveShiftStatus(shift) {
   if (openBreak) return "missing_break_end";
   if (!shift.clockOutAt) return "open_shift";
   return "completed";
+}
+
+function hasActiveBreak(shift) {
+  return Boolean(Array.isArray(shift?.breaks) && shift.breaks.find((item) => item.startAt && !item.endAt));
 }
 
 async function buildWorkplaceIndex() {
@@ -71,7 +83,7 @@ function firstLogOfType(shiftLogs, actionType) {
 // Row builder
 // ---------------------------------------------------------------------------
 
-function buildTimesheetRow(shift, user, shiftLogs, workplaceIndex) {
+function buildTimesheetRow(shift, user, shiftLogs, workplaceIndex, userIndex = {}) {
   const clockInLog = firstLogOfType(shiftLogs, "clock_in");
   const clockOutLog = firstLogOfType(shiftLogs, "clock_out");
 
@@ -101,6 +113,22 @@ function buildTimesheetRow(shift, user, shiftLogs, workplaceIndex) {
 
   const summary = buildShiftHourSummary(shift);
   const status = deriveShiftStatus(shift);
+  const finalActualHours = typeof shift?.actualHours === "number" ? shift.actualHours : summary.actualHours;
+  const finalPayableHours = typeof shift?.payableHours === "number" ? shift.payableHours : summary.payableHours;
+  const payableHoursAdjusted =
+    summary.payableHours !== null &&
+    typeof finalPayableHours === "number" &&
+    Number(finalPayableHours.toFixed(2)) !== Number(summary.payableHours.toFixed(2));
+  const hasException =
+    noLocation ||
+    lowAccuracy ||
+    outsideGeofence ||
+    unresolvedWorkplace ||
+    status === "open_shift" ||
+    status === "missing_break_end";
+  const reviewStatus = shift?.reviewStatus || null;
+  const reviewPending = hasException && !reviewStatus;
+  const reviewedByName = shift?.reviewedBy ? userIndex[shift.reviewedBy]?.name || null : null;
 
   return {
     shiftId: shift.id,
@@ -115,9 +143,11 @@ function buildTimesheetRow(shift, user, shiftLogs, workplaceIndex) {
     breakStartAt: (shift.breaks || []).map((b) => b.startAt || null).filter(Boolean),
     breakEndAt: (shift.breaks || []).map((b) => b.endAt || null).filter(Boolean),
     rawDuration: summary.rawDuration,
-    actualHours: summary.actualHours,
-    payableHours: summary.payableHours,
-    totalHours: summary.actualHours,
+    actualHours: finalActualHours,
+    payableHours: finalPayableHours,
+    systemPayableHours: summary.payableHours,
+    payableHoursAdjusted,
+    totalHours: finalActualHours,
     totalMinutes: summary.workedMinutes,
     breakMinutes: summary.breakMinutes,
     workplaceId: workplaceId || null,
@@ -139,6 +169,13 @@ function buildTimesheetRow(shift, user, shiftLogs, workplaceIndex) {
     locationAccuracy: typeof clockInLocation?.accuracy === "number" ? clockInLocation.accuracy : null,
     noLocation,
     lowAccuracy,
+    hasActiveBreak: hasActiveBreak(shift),
+    reviewStatus,
+    reviewPending,
+    reviewNote: shift?.reviewNote || null,
+    reviewedAt: shift?.reviewedAt || null,
+    reviewedByUserId: shift?.reviewedBy || null,
+    reviewedByName,
     clockInNotes: clockInLog?.notes || null,
     clockOutNotes: clockOutLog?.notes || null,
     createdAt: shift.createdAt || null,
@@ -166,7 +203,51 @@ function matchesStatus(row, status) {
   if (status === "low_accuracy") return row.lowAccuracy;
   if (status === "outside_geofence") return row.outsideGeofence;
   if (status === "workplace_unresolved") return row.unresolvedWorkplace;
+  if (status === "pending_review") return row.reviewPending;
+  if (status === "reviewed") return row.reviewStatus === "reviewed";
+  if (status === "follow_up_required") return row.reviewStatus === "follow_up_required";
   return row.status === status;
+}
+
+function normalizeReviewStatus(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (!REVIEW_STATUSES.has(normalized)) {
+    throw new HttpError(400, "reviewStatus must be one of: reviewed, follow_up_required");
+  }
+  return normalized;
+}
+
+function normalizeReviewNote(value) {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new HttpError(400, "reviewNote is required");
+  }
+
+  return value.trim().slice(0, ADMIN_REVIEW_NOTE_MAX_LENGTH);
+}
+
+function parseOptionalIsoDateTime(value, label) {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string" || !value.trim()) {
+    throw new HttpError(400, `${label} must be a valid ISO date string`);
+  }
+
+  const parsed = Date.parse(value.trim());
+  if (Number.isNaN(parsed)) {
+    throw new HttpError(400, `${label} must be a valid ISO date string`);
+  }
+
+  return new Date(parsed).toISOString();
+}
+
+function parseOptionalPayableHours(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 48) {
+    throw new HttpError(400, "payableHours must be a number between 0 and 48");
+  }
+
+  return Number(parsed.toFixed(2));
 }
 
 function parseDate(value) {
@@ -188,7 +269,13 @@ async function getFilteredTimesheetRows(filters) {
   const logsByShift = buildLogsByShift(timeLogs || []);
 
   const rows = (shifts || []).map((shift) =>
-    buildTimesheetRow(shift, userIndex[shift.userId] || null, logsByShift[shift.id] || [], workplaceIndex)
+    buildTimesheetRow(
+      shift,
+      userIndex[shift.userId] || null,
+      logsByShift[shift.id] || [],
+      workplaceIndex,
+      userIndex
+    )
   );
 
   return rows.filter((row) => {
@@ -235,6 +322,9 @@ export function parseTimesheetFilters(query) {
     "low_accuracy",
     "outside_geofence",
     "workplace_unresolved",
+    "pending_review",
+    "reviewed",
+    "follow_up_required",
     "",
   ]);
   const cleanStatus = typeof status === "string" && allowedStatuses.has(status) ? status : "";
@@ -336,16 +426,17 @@ export async function getAdminPayrollSummary(filters) {
 export async function getAdminTimesheetDetail(shiftId) {
   if (!shiftId || typeof shiftId !== "string") throw new HttpError(400, "shiftId is required");
 
-  const [allShifts, allTimeLogs] = await Promise.all([getAllShifts(), getAllTimeLogs()]);
-  const shift = (allShifts || []).find((s) => s.id === shiftId);
+  const shift = await getShiftById(shiftId);
   if (!shift) throw new HttpError(404, "Shift not found");
 
-  const userIndex = await buildUserIndex();
+  const [userIndex, workplaceIndex, shiftLogs] = await Promise.all([
+    buildUserIndex(),
+    buildWorkplaceIndex(),
+    getTimeLogsForShift(shiftId),
+  ]);
   const user = userIndex[shift.userId] || null;
-  const workplaceIndex = await buildWorkplaceIndex();
-  const shiftLogs = (allTimeLogs || []).filter((l) => l.shiftId === shiftId);
 
-  const row = buildTimesheetRow(shift, user, shiftLogs, workplaceIndex);
+  const row = buildTimesheetRow(shift, user, shiftLogs, workplaceIndex, userIndex);
 
   // Build enriched action history
   const actions = shiftLogs
@@ -353,6 +444,8 @@ export async function getAdminTimesheetDetail(shiftId) {
     .sort((a, b) => Date.parse(a.timestamp || "") - Date.parse(b.timestamp || ""))
     .map((log) => ({
       id: log.id,
+      actorUserId: log.userId,
+      actorName: userIndex[log.userId]?.name || null,
       actionType: log.actionType,
       timestamp: log.timestamp,
       location: log.location
@@ -368,6 +461,44 @@ export async function getAdminTimesheetDetail(shiftId) {
     }));
 
   return { ...row, actions, breaks: shift.breaks || [] };
+}
+
+export function parseTimesheetResolutionPayload(payload = {}) {
+  const reviewStatus = normalizeReviewStatus(payload.reviewStatus);
+  const closeOpenShiftAt = parseOptionalIsoDateTime(payload.closeOpenShiftAt, "closeOpenShiftAt");
+  const closeActiveBreakAt = parseOptionalIsoDateTime(payload.closeActiveBreakAt, "closeActiveBreakAt");
+  const payableHours = parseOptionalPayableHours(payload.payableHours);
+
+  const hasOperationalChange = Boolean(
+    closeOpenShiftAt || closeActiveBreakAt || payableHours !== null
+  );
+
+  if (!reviewStatus && !hasOperationalChange) {
+    throw new HttpError(400, "At least one resolution change is required");
+  }
+
+  const reviewNote = normalizeReviewNote(payload.reviewNote);
+
+  return {
+    reviewStatus,
+    reviewNote,
+    closeOpenShiftAt,
+    closeActiveBreakAt,
+    payableHours,
+    hasOperationalChange,
+  };
+}
+
+export async function resolveAdminTimesheet(shiftId, payload, actor) {
+  if (!actor?.id) throw new HttpError(401, "Admin user is required");
+
+  const parsed = parseTimesheetResolutionPayload(payload);
+  await applyAdminShiftResolution(shiftId, actor.id, {
+    ...parsed,
+    reviewStatus: parsed.reviewStatus || (parsed.hasOperationalChange ? "reviewed" : null),
+  });
+
+  return getAdminTimesheetDetail(shiftId);
 }
 
 // ---------------------------------------------------------------------------
@@ -388,6 +519,8 @@ const CSV_COLUMNS = [
   { header: "Raw Duration", key: "rawDuration" },
   { header: "Actual Hours", key: "actualHours" },
   { header: "Payable Hours", key: "payableHours" },
+  { header: "System Payable Hours", key: "systemPayableHours" },
+  { header: "Payable Hours Adjusted", key: "payableHoursAdjusted" },
   { header: "Workplace", key: "workplaceName" },
   { header: "Workplace Resolution", key: "workplaceResolution" },
   { header: "Assigned Workplace Used", key: "assignedWorkplaceUsed" },
@@ -399,6 +532,11 @@ const CSV_COLUMNS = [
   { header: "Location Accuracy (m)", key: "locationAccuracy" },
   { header: "No Location", key: "noLocation" },
   { header: "Low Accuracy", key: "lowAccuracy" },
+  { header: "Review Status", key: "reviewStatus" },
+  { header: "Review Pending", key: "reviewPending" },
+  { header: "Review Note", key: "reviewNote" },
+  { header: "Reviewed At", key: "reviewedAt" },
+  { header: "Reviewed By", key: "reviewedByName" },
   { header: "Clock In Notes", key: "clockInNotes" },
   { header: "Clock Out Notes", key: "clockOutNotes" },
 ];

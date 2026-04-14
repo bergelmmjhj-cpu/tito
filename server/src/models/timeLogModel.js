@@ -5,6 +5,13 @@ import { nowIso } from "../utils/time.js";
 import { isDatabaseReady, readDatabaseFromJson, writeDatabaseToJson } from "../db/initialization.js";
 import { HttpError } from "../utils/errors.js";
 
+const ADMIN_RESOLUTION_ACTIONS = {
+  review: "admin_review",
+  closeShift: "admin_close_shift",
+  endBreak: "admin_end_break",
+  adjustPayableHours: "admin_payable_adjustment",
+};
+
 function toNumberOrNull(value) {
   if (value === null || value === undefined || value === "") return null;
   const parsed = Number(value);
@@ -71,6 +78,10 @@ function normalizeDbShift(dbShift, breaks = []) {
     clockOutAt: normalizeTimestamp(dbShift.clock_out_at),
     actualHours: toNumberOrNull(dbShift.actual_hours) ?? summary.actualHours,
     payableHours: toNumberOrNull(dbShift.payable_hours) ?? summary.payableHours,
+    reviewStatus: dbShift.review_status || null,
+    reviewNote: dbShift.review_note || null,
+    reviewedBy: dbShift.reviewed_by || null,
+    reviewedAt: normalizeTimestamp(dbShift.reviewed_at),
     breaks: normalizedBreaks,
     createdAt: normalizeTimestamp(dbShift.created_at),
     updatedAt: normalizeTimestamp(dbShift.updated_at),
@@ -161,6 +172,21 @@ export async function getAllShifts() {
   );
 }
 
+export async function getShiftById(shiftId) {
+  if (!shiftId || typeof shiftId !== "string") return null;
+
+  if (!isDatabaseReady()) {
+    const db = await readDatabaseFromJson();
+    return (db.shifts || []).find((shift) => shift.id === shiftId) || null;
+  }
+
+  const result = await query(`SELECT s.* FROM shifts s WHERE s.id = $1 LIMIT 1`, [shiftId]);
+  if (result.rows.length === 0) return null;
+
+  const breaksResult = await query(`SELECT * FROM breaks WHERE shift_id = $1 ORDER BY start_at`, [shiftId]);
+  return normalizeDbShift(result.rows[0], breaksResult.rows);
+}
+
 export async function getOpenShiftForUser(userId) {
   if (!isDatabaseReady()) {
     const db = await readDatabaseFromJson();
@@ -219,6 +245,326 @@ export async function getAllTimeLogs() {
   });
 
   return result.rows.map(normalizeDbTimeLog);
+}
+
+export async function getTimeLogsForShift(shiftId) {
+  if (!shiftId || typeof shiftId !== "string") return [];
+
+  if (!isDatabaseReady()) {
+    const db = await readDatabaseFromJson();
+    return (db.timeLogs || []).filter((log) => log.shiftId === shiftId);
+  }
+
+  const result = await query(`SELECT * FROM time_logs WHERE shift_id = $1 ORDER BY timestamp ASC`, [
+    shiftId,
+  ]);
+  return result.rows.map(normalizeDbTimeLog);
+}
+
+function ensureIsoTimestamp(value, label) {
+  if (!value) throw new HttpError(400, `${label} is required`);
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) {
+    throw new HttpError(400, `${label} must be a valid ISO date string`);
+  }
+  return new Date(parsed).toISOString();
+}
+
+function validateResolutionTimes(shift, activeBreak, closeOpenShiftAt, closeActiveBreakAt) {
+  if (closeOpenShiftAt) {
+    const clockInAt = Date.parse(shift.clockInAt || "");
+    const clockOutAt = Date.parse(closeOpenShiftAt);
+    if (Number.isNaN(clockInAt) || Number.isNaN(clockOutAt) || clockOutAt < clockInAt) {
+      throw new HttpError(400, "closeOpenShiftAt must be on or after clock-in time");
+    }
+  }
+
+  if (closeActiveBreakAt && activeBreak?.startAt) {
+    const breakStartAt = Date.parse(activeBreak.startAt);
+    const breakEndAt = Date.parse(closeActiveBreakAt);
+    if (Number.isNaN(breakStartAt) || Number.isNaN(breakEndAt) || breakEndAt < breakStartAt) {
+      throw new HttpError(400, "closeActiveBreakAt must be on or after the active break start time");
+    }
+
+    if (!closeOpenShiftAt && shift.clockOutAt) {
+      const shiftClockOutAt = Date.parse(shift.clockOutAt);
+      if (!Number.isNaN(shiftClockOutAt) && breakEndAt > shiftClockOutAt) {
+        throw new HttpError(400, "closeActiveBreakAt must be on or before the recorded shift clock-out time");
+      }
+    }
+  }
+
+  if (closeOpenShiftAt && closeActiveBreakAt) {
+    const clockOutAt = Date.parse(closeOpenShiftAt);
+    const breakEndAt = Date.parse(closeActiveBreakAt);
+    if (Number.isNaN(clockOutAt) || Number.isNaN(breakEndAt) || breakEndAt > clockOutAt) {
+      throw new HttpError(400, "closeActiveBreakAt must be on or before closeOpenShiftAt");
+    }
+  }
+}
+
+function buildAdminResolutionLogs({
+  actorUserId,
+  shiftId,
+  eventTimestamp,
+  reviewStatus,
+  reviewNote,
+  closeOpenShiftAt,
+  closeActiveBreakAt,
+  payableHours,
+}) {
+  const logs = [];
+
+  if (reviewStatus || reviewNote) {
+    const statusText = reviewStatus === "follow_up_required" ? "Follow-up required" : "Reviewed";
+    logs.push({
+      id: crypto.randomUUID(),
+      userId: actorUserId,
+      shiftId,
+      actionType: ADMIN_RESOLUTION_ACTIONS.review,
+      timestamp: eventTimestamp,
+      notes: `Manager review: ${statusText}. ${reviewNote}`.trim(),
+    });
+  }
+
+  if (closeActiveBreakAt) {
+    logs.push({
+      id: crypto.randomUUID(),
+      userId: actorUserId,
+      shiftId,
+      actionType: ADMIN_RESOLUTION_ACTIONS.endBreak,
+      timestamp: eventTimestamp,
+      notes: `Admin ended active break at ${closeActiveBreakAt}. ${reviewNote}`.trim(),
+    });
+  }
+
+  if (closeOpenShiftAt) {
+    logs.push({
+      id: crypto.randomUUID(),
+      userId: actorUserId,
+      shiftId,
+      actionType: ADMIN_RESOLUTION_ACTIONS.closeShift,
+      timestamp: eventTimestamp,
+      notes: `Admin closed open shift at ${closeOpenShiftAt}. ${reviewNote}`.trim(),
+    });
+  }
+
+  if (payableHours !== null && payableHours !== undefined) {
+    logs.push({
+      id: crypto.randomUUID(),
+      userId: actorUserId,
+      shiftId,
+      actionType: ADMIN_RESOLUTION_ACTIONS.adjustPayableHours,
+      timestamp: eventTimestamp,
+      notes: `Final payable hours set to ${Number(payableHours).toFixed(2)}. ${reviewNote}`.trim(),
+    });
+  }
+
+  return logs;
+}
+
+export async function applyAdminShiftResolution(shiftId, actorUserId, resolution = {}) {
+  if (!shiftId || typeof shiftId !== "string") {
+    throw new HttpError(400, "shiftId is required");
+  }
+
+  if (!actorUserId || typeof actorUserId !== "string") {
+    throw new HttpError(400, "actorUserId is required");
+  }
+
+  const eventTimestamp = nowIso();
+
+  if (!isDatabaseReady()) {
+    const db = await readDatabaseFromJson();
+    const shift = (db.shifts || []).find((item) => item.id === shiftId) || null;
+    if (!shift) throw new HttpError(404, "Shift not found");
+
+    const activeBreak = Array.isArray(shift.breaks)
+      ? [...shift.breaks].reverse().find((item) => item.startAt && !item.endAt) || null
+      : null;
+
+    if (resolution.closeOpenShiftAt && shift.clockOutAt) {
+      throw new HttpError(409, "Shift is already closed");
+    }
+
+    let closeActiveBreakAt = resolution.closeActiveBreakAt || null;
+    if (resolution.closeOpenShiftAt && activeBreak && !closeActiveBreakAt) {
+      closeActiveBreakAt = resolution.closeOpenShiftAt;
+    }
+
+    if (closeActiveBreakAt && !activeBreak) {
+      throw new HttpError(409, "No active break is open for this shift");
+    }
+
+    validateResolutionTimes(shift, activeBreak, resolution.closeOpenShiftAt, closeActiveBreakAt);
+
+    if (closeActiveBreakAt && activeBreak) {
+      activeBreak.endAt = ensureIsoTimestamp(closeActiveBreakAt, "closeActiveBreakAt");
+    }
+
+    if (resolution.closeOpenShiftAt) {
+      shift.clockOutAt = ensureIsoTimestamp(resolution.closeOpenShiftAt, "closeOpenShiftAt");
+    }
+
+    const summary = buildShiftHourSummary(shift);
+    if (resolution.payableHours !== null && resolution.payableHours !== undefined && !shift.clockOutAt) {
+      throw new HttpError(400, "Payable hours can only be set on a closed shift");
+    }
+
+    shift.actualHours = summary.actualHours;
+    shift.payableHours =
+      resolution.payableHours !== null && resolution.payableHours !== undefined
+        ? resolution.payableHours
+        : summary.payableHours;
+    shift.reviewStatus = resolution.reviewStatus || shift.reviewStatus || null;
+    shift.reviewNote = resolution.reviewNote;
+    shift.reviewedBy = actorUserId;
+    shift.reviewedAt = eventTimestamp;
+    shift.updatedAt = eventTimestamp;
+
+    if (!Array.isArray(db.timeLogs)) db.timeLogs = [];
+    db.timeLogs.push(
+      ...buildAdminResolutionLogs({
+        actorUserId,
+        shiftId,
+        eventTimestamp,
+        reviewStatus: shift.reviewStatus,
+        reviewNote: resolution.reviewNote,
+        closeOpenShiftAt: shift.clockOutAt && resolution.closeOpenShiftAt ? shift.clockOutAt : null,
+        closeActiveBreakAt,
+        payableHours:
+          resolution.payableHours !== null && resolution.payableHours !== undefined
+            ? resolution.payableHours
+            : null,
+      }).map((item) => ({
+        ...item,
+        location: null,
+        geofence: null,
+        createdAt: eventTimestamp,
+      }))
+    );
+
+    await writeDatabaseToJson(db);
+    return shift;
+  }
+
+  return withClient(async (client) => {
+    await client.query("BEGIN");
+
+    try {
+      const shiftResult = await client.query(`SELECT * FROM shifts WHERE id = $1 LIMIT 1 FOR UPDATE`, [shiftId]);
+      if (shiftResult.rows.length === 0) {
+        throw new HttpError(404, "Shift not found");
+      }
+
+      const breaksResult = await client.query(
+        `SELECT * FROM breaks WHERE shift_id = $1 ORDER BY start_at FOR UPDATE`,
+        [shiftId]
+      );
+
+      const currentShift = normalizeDbShift(shiftResult.rows[0], breaksResult.rows);
+      const activeBreak =
+        [...(currentShift.breaks || [])].reverse().find((item) => item.startAt && !item.endAt) || null;
+
+      if (resolution.closeOpenShiftAt && currentShift.clockOutAt) {
+        throw new HttpError(409, "Shift is already closed");
+      }
+
+      let closeActiveBreakAt = resolution.closeActiveBreakAt || null;
+      if (resolution.closeOpenShiftAt && activeBreak && !closeActiveBreakAt) {
+        closeActiveBreakAt = resolution.closeOpenShiftAt;
+      }
+
+      if (closeActiveBreakAt && !activeBreak) {
+        throw new HttpError(409, "No active break is open for this shift");
+      }
+
+      validateResolutionTimes(currentShift, activeBreak, resolution.closeOpenShiftAt, closeActiveBreakAt);
+
+      const nextShift = {
+        ...currentShift,
+        clockOutAt: resolution.closeOpenShiftAt
+          ? ensureIsoTimestamp(resolution.closeOpenShiftAt, "closeOpenShiftAt")
+          : currentShift.clockOutAt,
+        breaks: (currentShift.breaks || []).map((item) => {
+          if (!closeActiveBreakAt || item.id !== activeBreak?.id) return item;
+          return {
+            ...item,
+            endAt: ensureIsoTimestamp(closeActiveBreakAt, "closeActiveBreakAt"),
+          };
+        }),
+      };
+
+      const summary = buildShiftHourSummary(nextShift);
+      if (resolution.payableHours !== null && resolution.payableHours !== undefined && !nextShift.clockOutAt) {
+        throw new HttpError(400, "Payable hours can only be set on a closed shift");
+      }
+
+      if (closeActiveBreakAt && activeBreak) {
+        await client.query(`UPDATE breaks SET end_at = $1 WHERE id = $2`, [
+          ensureIsoTimestamp(closeActiveBreakAt, "closeActiveBreakAt"),
+          activeBreak.id,
+        ]);
+      }
+
+      const finalPayableHours =
+        resolution.payableHours !== null && resolution.payableHours !== undefined
+          ? resolution.payableHours
+          : summary.payableHours;
+
+      await client.query(
+        `UPDATE shifts
+        SET clock_out_at = $1,
+            actual_hours = $2,
+            payable_hours = $3,
+            review_status = $4,
+            review_note = $5,
+            reviewed_by = $6,
+            reviewed_at = $7,
+            updated_at = $8
+        WHERE id = $9`,
+        [
+          nextShift.clockOutAt,
+          summary.actualHours,
+          finalPayableHours,
+          resolution.reviewStatus || currentShift.reviewStatus || null,
+          resolution.reviewNote,
+          actorUserId,
+          eventTimestamp,
+          eventTimestamp,
+          shiftId,
+        ]
+      );
+
+      const adminLogs = buildAdminResolutionLogs({
+        actorUserId,
+        shiftId,
+        eventTimestamp,
+        reviewStatus: resolution.reviewStatus || currentShift.reviewStatus || null,
+        reviewNote: resolution.reviewNote,
+        closeOpenShiftAt: resolution.closeOpenShiftAt ? nextShift.clockOutAt : null,
+        closeActiveBreakAt: closeActiveBreakAt ? ensureIsoTimestamp(closeActiveBreakAt, "closeActiveBreakAt") : null,
+        payableHours:
+          resolution.payableHours !== null && resolution.payableHours !== undefined
+            ? resolution.payableHours
+            : null,
+      });
+
+      for (const log of adminLogs) {
+        await client.query(
+          `INSERT INTO time_logs (id, user_id, shift_id, action_type, timestamp, location, geofence, notes, created_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [log.id, log.userId, log.shiftId, log.actionType, log.timestamp, null, null, log.notes, eventTimestamp]
+        );
+      }
+
+      await client.query("COMMIT");
+      return getShiftById(shiftId);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    }
+  });
 }
 
 export async function saveClockIn(userId, notes = null, location = null, geofence = null) {

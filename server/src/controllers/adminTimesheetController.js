@@ -4,6 +4,7 @@ import {
   getAdminTimesheetDetail,
   listAdminTimesheets,
   parseTimesheetFilters,
+  resolveAdminTimesheet,
 } from "../services/adminTimesheetService.js";
 import { toHttpError } from "../utils/errors.js";
 
@@ -90,6 +91,41 @@ export async function payrollSummaryController(req, res) {
     console.error("[admin.timesheets.payroll] failed", {
       adminUserId: req.user?.id || null,
       query: req.query || {},
+      message: error?.message || "unknown_error",
+      name: error?.name || "Error",
+      stack: error?.stack || "no_stack",
+    });
+    const err = toHttpError(error);
+    res.status(err.status).json({ error: err.message });
+  }
+}
+
+export async function resolveTimesheetController(req, res) {
+  try {
+    console.info("[admin.timesheets.resolve] endpoint hit", {
+      adminUserId: req.user?.id || null,
+      shiftId: req.params.shiftId,
+      body: {
+        reviewStatus: req.body?.reviewStatus || null,
+        hasReviewNote: Boolean(req.body?.reviewNote),
+        hasCloseOpenShiftAt: Boolean(req.body?.closeOpenShiftAt),
+        hasCloseActiveBreakAt: Boolean(req.body?.closeActiveBreakAt),
+        hasPayableHours:
+          req.body?.payableHours !== undefined && req.body?.payableHours !== null && req.body?.payableHours !== "",
+      },
+    });
+
+    const detail = await resolveAdminTimesheet(req.params.shiftId, req.body || {}, req.user);
+    console.info("[admin.timesheets.resolve] success", {
+      adminUserId: req.user?.id || null,
+      shiftId: req.params.shiftId,
+      reviewStatus: detail?.reviewStatus || null,
+    });
+    res.json({ timesheet: detail });
+  } catch (error) {
+    console.error("[admin.timesheets.resolve] failed", {
+      adminUserId: req.user?.id || null,
+      shiftId: req.params.shiftId,
       message: error?.message || "unknown_error",
       name: error?.name || "Error",
       stack: error?.stack || "no_stack",

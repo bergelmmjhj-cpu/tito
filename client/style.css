@@ -83,7 +83,8 @@ label {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   margin-top: 6px;
   padding: 11px 12px;
@@ -97,9 +98,15 @@ select {
 }
 
 input:focus,
-select:focus {
+select:focus,
+textarea:focus {
   border-color: rgba(116, 164, 255, 0.85);
   box-shadow: 0 0 0 3px rgba(91, 146, 255, 0.18);
+}
+
+textarea {
+  min-height: 100px;
+  resize: vertical;
 }
 
 .actions {
@@ -533,10 +540,48 @@ th {
   font-size: 0.82rem;
 }
 
+.resolution-panel {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.resolution-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px 12px;
+  margin-top: 10px;
+}
+
+.resolution-form .actions,
+.resolution-form .full-width {
+  grid-column: 1 / -1;
+}
+
+.resolution-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 0.9rem;
+}
+
+.resolution-option input {
+  width: auto;
+  margin-top: 0;
+}
+
+.detail-note {
+  margin-top: 8px;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+
 .status-badge-open { color: #facc15; }
 .status-badge-completed { color: #34d399; }
 .status-badge-missing { color: #ff9cad; }
 .status-badge-warn { color: #fdba74; }
+.status-badge-review { color: #93c5fd; }
 
 .google-btn {
   width: 100%;

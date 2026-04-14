@@ -171,11 +171,15 @@ function setInfo(el, message) {
   el.textContent = message || "";
 }
 
+function setInlineFeedback(el, message, tone = "info") {
+  if (!el) return;
+  el.textContent = message || "";
+  el.className = `action-feedback ${tone}`;
+  el.classList.toggle("hidden", !message);
+}
+
 function setActionFeedback(message, tone = "info") {
-  if (!actionFeedbackEl) return;
-  actionFeedbackEl.textContent = message || "";
-  actionFeedbackEl.className = `action-feedback ${tone}`;
-  actionFeedbackEl.classList.toggle("hidden", !message);
+  setInlineFeedback(actionFeedbackEl, message, tone);
 }
 
 function resetActionButtonVisualState() {
@@ -251,6 +255,29 @@ function formatDateTime(value) {
   return date.toLocaleString();
 }
 
+function formatDateTimeInputValue(value) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) return "";
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60 * 1000);
+  return local.toISOString().slice(0, 16);
+}
+
+function parseDateTimeLocalToIso(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function toStatusLabel(status) {
   if (status === "clocked_in") return "Clocked in";
   if (status === "on_break") return "On break";
@@ -263,6 +290,10 @@ function toActionLabel(actionType) {
   if (actionType === "break_start") return "Start Break";
   if (actionType === "break_end") return "End Break";
   if (actionType === "clock_out") return "Clock Out";
+  if (actionType === "admin_review") return "Manager Review";
+  if (actionType === "admin_close_shift") return "Manager Closed Shift";
+  if (actionType === "admin_end_break") return "Manager Ended Break";
+  if (actionType === "admin_payable_adjustment") return "Manager Adjusted Payable Hours";
   return actionType || "—";
 }
 
@@ -1618,6 +1649,7 @@ const timesheetErrorEl = document.getElementById("timesheetError");
 const exportTimesheetsCsvBtnEl = document.getElementById("exportTimesheetsCsvBtn");
 const refreshTimesheetsBtnEl = document.getElementById("refreshTimesheetsBtn");
 const timesheetDetailPanelEl = document.getElementById("timesheetDetailPanel");
+const timesheetActionMessageEl = document.getElementById("timesheetActionMessage");
 const timesheetDetailContentEl = document.getElementById("timesheetDetailContent");
 const closeTimesheetDetailBtnEl = document.getElementById("closeTimesheetDetailBtn");
 
@@ -1663,6 +1695,39 @@ function statusBadgeHtml(status) {
   return `<span class="status-badge-warn">${status || "—"}</span>`;
 }
 
+function toReviewStateLabel(reviewStatus, reviewPending) {
+  if (reviewStatus === "reviewed") {
+    return `<span class="status-badge-review">Reviewed</span>`;
+  }
+
+  if (reviewStatus === "follow_up_required") {
+    return `<span class="status-badge-missing">Follow-up required</span>`;
+  }
+
+  if (reviewPending) {
+    return `<span class="status-badge-warn">Pending review</span>`;
+  }
+
+  return "—";
+}
+
+function buildTimesheetAttentionItems(ts) {
+  const items = [
+    ts.outsideGeofence ? "Outside workplace area" : null,
+    ts.unresolvedWorkplace ? "Workplace unresolved" : null,
+    ts.status === "missing_break_end" ? "Missing break end" : null,
+    ts.status === "open_shift" ? "Open shift" : null,
+    ts.noLocation ? "No location" : null,
+  ].filter(Boolean);
+
+  const reviewLabel = toReviewStateLabel(ts.reviewStatus, ts.reviewPending);
+  if (reviewLabel !== "—") {
+    items.push(reviewLabel.replace(/<[^>]+>/g, ""));
+  }
+
+  return items;
+}
+
 function formatBreakList(arr) {
   if (!Array.isArray(arr) || arr.length === 0) return "—";
   return arr.map(formatDateTime).join("<br>");
@@ -1675,13 +1740,8 @@ function renderTimesheets(timesheets) {
   }
 
   timesheetsBodyEl.innerHTML = timesheets.map((ts) => {
-    const attention = [
-      ts.outsideGeofence ? "Outside workplace area" : null,
-      ts.unresolvedWorkplace ? "Workplace unresolved" : null,
-      ts.status === "missing_break_end" ? "Missing break end" : null,
-      ts.status === "open_shift" ? "Open shift" : null,
-      ts.noLocation ? "No location" : null,
-    ].filter(Boolean);
+    const attention = buildTimesheetAttentionItems(ts);
+    const noteText = ts.reviewNote || ts.clockInNotes || ts.clockOutNotes || "—";
 
     return `
       <tr class="ts-row" data-shiftid="${ts.shiftId}">
@@ -1693,7 +1753,7 @@ function renderTimesheets(timesheets) {
         <td>${formatHours(ts.actualHours)}</td>
         <td>${statusBadgeHtml(ts.status)}</td>
         <td>${attention.length ? attention.join(", ") : "—"}</td>
-        <td>${ts.clockInNotes || ts.clockOutNotes || "—"}</td>
+        <td>${noteText}</td>
       </tr>`;
   }).join("");
 }
@@ -1759,6 +1819,7 @@ async function populateWorkplaceFilter() {
 
 async function initTimesheetsScreen() {
   setError(timesheetErrorEl, "");
+  setInlineFeedback(timesheetActionMessageEl, "", "info");
   clearTimesheetFilters();
   timesheetDetailPanelEl.classList.add("hidden");
   await populateWorkplaceFilter();
@@ -1784,6 +1845,14 @@ function renderTimesheetDetail(detail) {
     ? `${detail.locationAccuracy.toFixed(1)} m`
     : "n/a";
 
+  const reviewLabel = toReviewStateLabel(detail.reviewStatus, detail.reviewPending);
+  const activeBreak = Array.isArray(detail.breaks)
+    ? [...detail.breaks].reverse().find((item) => item.startAt && !item.endAt) || null
+    : null;
+  const currentPayablePlaceholder =
+    typeof detail.payableHours === "number" ? detail.payableHours.toFixed(2) : "";
+  const defaultReviewStatus = detail.reviewStatus === "follow_up_required" ? "follow_up_required" : "reviewed";
+
   const summaryHtml = `
     <div class="detail-grid">
       ${field("Shift ID", detail.shiftId)}
@@ -1796,16 +1865,83 @@ function renderTimesheetDetail(detail) {
       ${field("Clock Out", formatDateTime(detail.clockOutAt))}
       ${field("Raw Duration", detail.rawDuration || formatDurationMinutes(detail.totalMinutes))}
       ${field("Actual Hours", formatHours(detail.actualHours))}
-      ${field("Payable Hours", formatHours(detail.payableHours))}
+      ${field("Final Payable Hours", formatHours(detail.payableHours))}
+      ${field("System Payable Hours", formatHours(detail.systemPayableHours))}
       ${field("Break Minutes", typeof detail.breakMinutes === "number" ? detail.breakMinutes : "—")}
       ${field("Workplace", detail.workplaceName)}
       ${field("Geofence", geofenceStr)}
       ${field("Distance", distanceStr)}
       ${field("Location", detail.locationSummary || "—")}
       ${field("Location Accuracy", accuracyStr)}
+      ${field("Review Status", reviewLabel)}
+      ${field("Reviewed By", detail.reviewedByName || "—")}
+      ${field("Reviewed At", formatDateTime(detail.reviewedAt))}
+      ${field("Payable Adjusted", detail.payableHoursAdjusted ? "Yes" : "No")}
+      ${field("Review Note", detail.reviewNote || "—")}
       ${field("Clock-In Notes", detail.clockInNotes || "—")}
       ${field("Clock-Out Notes", detail.clockOutNotes || "—")}
     </div>`;
+
+  const resolutionHtml = `
+    <section class="resolution-panel">
+      <h3>Resolution Tools</h3>
+      <p class="detail-note">Use these actions to close operational exceptions and leave a manager audit note.</p>
+      <form id="timesheetResolutionForm" class="resolution-form" data-shiftid="${detail.shiftId}">
+        <label>
+          Review Status
+          <select name="reviewStatus">
+            <option value="reviewed" ${defaultReviewStatus === "reviewed" ? "selected" : ""}>Reviewed</option>
+            <option value="follow_up_required" ${defaultReviewStatus === "follow_up_required" ? "selected" : ""}>Follow-up required</option>
+          </select>
+        </label>
+
+        ${!detail.clockOutAt ? `
+          <div>
+            <label class="resolution-option">
+              <input type="checkbox" name="closeOpenShift" />
+              Close open shift
+            </label>
+            <label>
+              Close Shift At
+              <input name="closeOpenShiftAt" type="datetime-local" value="${escapeHtml(formatDateTimeInputValue())}" />
+            </label>
+          </div>
+        ` : ""}
+
+        ${detail.hasActiveBreak ? `
+          <div>
+            <label class="resolution-option">
+              <input type="checkbox" name="closeActiveBreak" />
+              End active break
+            </label>
+            <label>
+              End Break At
+              <input name="closeActiveBreakAt" type="datetime-local" value="${escapeHtml(formatDateTimeInputValue())}" />
+            </label>
+          </div>
+        ` : ""}
+
+        <label>
+          Override Final Payable Hours (optional)
+          <input
+            name="payableHours"
+            type="number"
+            step="0.25"
+            min="0"
+            max="48"
+            placeholder="Current: ${escapeHtml(currentPayablePlaceholder || "—")}" />
+        </label>
+
+        <label class="full-width">
+          Manager Note
+          <textarea name="reviewNote" maxlength="1000" required placeholder="Explain what was reviewed or changed.">${escapeHtml(detail.reviewNote || "")}</textarea>
+        </label>
+
+        <div class="actions">
+          <button type="submit">Save Resolution</button>
+        </div>
+      </form>
+    </section>`;
 
   const actionsHtml = Array.isArray(detail.actions) && detail.actions.length > 0
     ? `<h3 style="margin:12px 0 6px">Action History</h3>
@@ -1814,6 +1950,7 @@ function renderTimesheetDetail(detail) {
            <thead>
              <tr>
                <th>Action</th>
+                <th>Actor</th>
                <th>Timestamp</th>
                <th>Location</th>
                <th>Accuracy</th>
@@ -1842,6 +1979,7 @@ function renderTimesheetDetail(detail) {
                  : "—";
                return `<tr>
                  <td>${toActionLabel(a.actionType)}</td>
+                 <td>${a.actorName || "—"}</td>
                  <td>${formatDateTime(a.timestamp)}</td>
                  <td>${locStr}</td>
                  <td>${accStr}</td>
@@ -1857,18 +1995,60 @@ function renderTimesheetDetail(detail) {
        </div>`
     : `<p class="muted">No action logs found for this shift.</p>`;
 
-  timesheetDetailContentEl.innerHTML = summaryHtml + actionsHtml;
+  timesheetDetailContentEl.innerHTML = summaryHtml + resolutionHtml + actionsHtml;
   timesheetDetailPanelEl.classList.remove("hidden");
   timesheetDetailPanelEl.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 async function loadTimesheetDetail(shiftId) {
   setError(timesheetErrorEl, "");
+  setInlineFeedback(timesheetActionMessageEl, "", "info");
   try {
     const data = await apiFetch(`/api/admin/timesheets/${encodeURIComponent(shiftId)}`);
     renderTimesheetDetail(data.timesheet);
   } catch (error) {
     setError(timesheetErrorEl, error.message);
+  }
+}
+
+async function submitTimesheetResolution(form) {
+  const shiftId = form.dataset.shiftid;
+  if (!shiftId) return;
+
+  setError(timesheetErrorEl, "");
+  setInlineFeedback(timesheetActionMessageEl, "Saving resolution...", "info");
+
+  const formData = new FormData(form);
+  const payload = {
+    reviewStatus: String(formData.get("reviewStatus") || "").trim() || undefined,
+    reviewNote: String(formData.get("reviewNote") || "").trim() || undefined,
+  };
+
+  if (formData.get("closeOpenShift") === "on") {
+    payload.closeOpenShiftAt = parseDateTimeLocalToIso(String(formData.get("closeOpenShiftAt") || ""));
+  }
+
+  if (formData.get("closeActiveBreak") === "on") {
+    payload.closeActiveBreakAt = parseDateTimeLocalToIso(String(formData.get("closeActiveBreakAt") || ""));
+  }
+
+  const payableHoursRaw = String(formData.get("payableHours") || "").trim();
+  if (payableHoursRaw) {
+    payload.payableHours = Number(payableHoursRaw);
+  }
+
+  try {
+    const data = await apiFetch(`/api/admin/timesheets/${encodeURIComponent(shiftId)}/resolve`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+
+    renderTimesheetDetail(data.timesheet);
+    setInlineFeedback(timesheetActionMessageEl, "Resolution saved.", "success");
+    await loadTimesheets(timesheetsLastFilters, timesheetsCurrentPage);
+  } catch (error) {
+    setError(timesheetErrorEl, error.message);
+    setInlineFeedback(timesheetActionMessageEl, error.message, "error");
   }
 }
 
@@ -1918,7 +2098,15 @@ timesheetsBodyEl.addEventListener("click", (event) => {
   loadTimesheetDetail(row.dataset.shiftid);
 });
 
+timesheetDetailContentEl.addEventListener("submit", (event) => {
+  const form = event.target.closest("form#timesheetResolutionForm");
+  if (!form) return;
+  event.preventDefault();
+  submitTimesheetResolution(form);
+});
+
 closeTimesheetDetailBtnEl.addEventListener("click", () => {
+  setInlineFeedback(timesheetActionMessageEl, "", "info");
   timesheetDetailPanelEl.classList.add("hidden");
 });
 
