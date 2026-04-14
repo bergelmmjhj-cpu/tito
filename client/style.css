@@ -482,6 +482,39 @@ th {
   gap: 8px;
 }
 
+.timesheet-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin: 10px 0 12px;
+}
+
+.timesheet-summary-card {
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-soft);
+  background: rgba(8, 18, 37, 0.6);
+}
+
+.timesheet-summary-card .eyebrow {
+  color: var(--muted);
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.timesheet-summary-card .value {
+  margin-top: 4px;
+  font-size: 1.35rem;
+  font-weight: 750;
+}
+
+.timesheet-summary-card .meta {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .pagination-bar {
   margin-top: 10px;
   display: flex;
@@ -582,6 +615,9 @@ th {
 .status-badge-missing { color: #ff9cad; }
 .status-badge-warn { color: #fdba74; }
 .status-badge-review { color: #93c5fd; }
+.status-badge-payroll-pending { color: #fdba74; }
+.status-badge-payroll-approved { color: #7dd3fc; }
+.status-badge-payroll-exported { color: #34d399; }
 
 .google-btn {
   width: 100%;

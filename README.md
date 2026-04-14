@@ -11,6 +11,7 @@ First working version of a worker time clock flow for hotel staff.
 - Worker login (staff ID or email + password)
 - Worker self-signup (first name, last name, email, password, optional phone)
 - Admin workplace management (create, edit, activate/deactivate)
+- Admin timesheet review, payroll approval, and payroll export tracking
 - Time clock page with live status and actions (clock in, break start/end, clock out)
 - Browser geolocation capture on every attendance action (clock in, break start/end, clock out)
 - Per-action location history (coordinates, accuracy, location capture timestamp)
@@ -281,6 +282,16 @@ Migration logic lives in:
 | `GET` | `/api/admin/assignable-workplaces` | - | List active workplaces available for assignment |
 | `PATCH` | `/api/admin/workers/:workerUserId/workplace` | `{ "workplaceId": "id" }` or `{ "workplaceId": null }` | Assign/unassign worker workplace |
 
+### Admin timesheets (admin only)
+
+| Method | Path | Body | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/admin/timesheets` | query `dateFrom`, `dateTo`, `search`, `workplaceId`, `status`, `payrollStatus`, `page`, `limit` | List business-date timesheets with review and payroll state |
+| `GET` | `/api/admin/timesheets/:shiftId` | - | Get detailed shift history, review metadata, and payroll metadata |
+| `PATCH` | `/api/admin/timesheets/:shiftId/resolve` | `{ "reviewStatus", "payrollStatus", "reviewNote", "closeOpenShiftAt?", "closeActiveBreakAt?", "payableHours?" }` | Resolve exceptions, set payroll state, and create audit entries |
+| `GET` | `/api/admin/timesheets/summary/payroll` | same filters as list | Return filtered payroll readiness and approved/exported totals |
+| `GET` | `/api/admin/timesheets/export/csv` | same filters as list | Export filtered timesheets including payroll approval/export columns |
+
 ### Legacy compatibility routes
 
 Existing v1 routes are still available:
@@ -323,6 +334,13 @@ Existing v1 routes are still available:
 - Use activate/deactivate for archival behavior instead of hard delete.
 - In the `Worker Workplace Assignment` section, assign each worker to one active workplace.
 - Time Clock view now shows assigned workplace info and latest distance check result.
+
+## Timesheet payroll workflow
+
+- Review exceptions from the `Timesheets` screen using business-date filters.
+- Mark a closed, reviewed shift as `Approved for payroll` when it is ready to leave operations review.
+- Mark an already approved shift as `Exported to payroll` after it is sent to payroll.
+- Revert a shift to `Pending` if payroll needs it reopened; the audit trail records each transition.
 
 ## CRM and geofencing readiness
 

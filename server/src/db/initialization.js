@@ -99,9 +99,15 @@ async function applySchemaAlterations() {
     `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS review_note TEXT`,
     `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS reviewed_by TEXT REFERENCES users(id) ON DELETE SET NULL`,
     `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP`,
+    `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS payroll_status VARCHAR(50) DEFAULT 'pending'`,
+    `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS payroll_approved_by TEXT REFERENCES users(id) ON DELETE SET NULL`,
+    `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS payroll_approved_at TIMESTAMP`,
+    `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS payroll_exported_by TEXT REFERENCES users(id) ON DELETE SET NULL`,
+    `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS payroll_exported_at TIMESTAMP`,
+    `CREATE INDEX IF NOT EXISTS idx_shifts_payroll_status ON shifts(payroll_status)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS uq_shifts_one_open_per_user ON shifts(user_id) WHERE clock_out_at IS NULL`,
     `ALTER TABLE time_logs DROP CONSTRAINT IF EXISTS time_logs_action_type_check`,
-    `ALTER TABLE time_logs ADD CONSTRAINT time_logs_action_type_check CHECK (action_type IN ('clock_in', 'break_start', 'break_end', 'clock_out', 'admin_review', 'admin_close_shift', 'admin_end_break', 'admin_payable_adjustment'))`,
+    `ALTER TABLE time_logs ADD CONSTRAINT time_logs_action_type_check CHECK (action_type IN ('clock_in', 'break_start', 'break_end', 'clock_out', 'admin_review', 'admin_close_shift', 'admin_end_break', 'admin_payable_adjustment', 'admin_payroll_approved', 'admin_payroll_exported', 'admin_payroll_reopened'))`,
   ];
 
   for (const sql of alterations) {
@@ -210,8 +216,11 @@ async function migrateFromJsonIfExists() {
             const summary = buildShiftHourSummary(shift);
             await client.query(
               `INSERT INTO shifts (
-                id, user_id, clock_in_at, clock_out_at, business_date, business_time_zone, actual_hours, payable_hours, created_at, updated_at
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                id, user_id, clock_in_at, clock_out_at, business_date, business_time_zone,
+                actual_hours, payable_hours, review_status, review_note, reviewed_by, reviewed_at,
+                payroll_status, payroll_approved_by, payroll_approved_at, payroll_exported_by, payroll_exported_at,
+                created_at, updated_at
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
               ON CONFLICT (id) DO NOTHING`,
               [
                 shift.id,
@@ -222,6 +231,15 @@ async function migrateFromJsonIfExists() {
                 shift.businessTimeZone || null,
                 shift.actualHours ?? summary.actualHours,
                 shift.payableHours ?? summary.payableHours,
+                shift.reviewStatus || null,
+                shift.reviewNote || null,
+                shift.reviewedBy || null,
+                shift.reviewedAt || null,
+                shift.payrollStatus || "pending",
+                shift.payrollApprovedBy || null,
+                shift.payrollApprovedAt || null,
+                shift.payrollExportedBy || null,
+                shift.payrollExportedAt || null,
                 shift.createdAt || new Date().toISOString(),
                 shift.updatedAt || new Date().toISOString(),
               ]

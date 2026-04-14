@@ -10,7 +10,16 @@ const ADMIN_RESOLUTION_ACTIONS = {
   closeShift: "admin_close_shift",
   endBreak: "admin_end_break",
   adjustPayableHours: "admin_payable_adjustment",
+  approvePayroll: "admin_payroll_approved",
+  exportPayroll: "admin_payroll_exported",
+  reopenPayroll: "admin_payroll_reopened",
 };
+
+const PAYROLL_STATUSES = new Set(["pending", "approved", "exported"]);
+
+function normalizePayrollStatus(value) {
+  return PAYROLL_STATUSES.has(value) ? value : "pending";
+}
 
 function toNumberOrNull(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -85,6 +94,11 @@ function normalizeDbShift(dbShift, breaks = []) {
     reviewNote: dbShift.review_note || null,
     reviewedBy: dbShift.reviewed_by || null,
     reviewedAt: normalizeTimestamp(dbShift.reviewed_at),
+    payrollStatus: normalizePayrollStatus(dbShift.payroll_status),
+    payrollApprovedBy: dbShift.payroll_approved_by || null,
+    payrollApprovedAt: normalizeTimestamp(dbShift.payroll_approved_at),
+    payrollExportedBy: dbShift.payroll_exported_by || null,
+    payrollExportedAt: normalizeTimestamp(dbShift.payroll_exported_at),
     breaks: normalizedBreaks,
     createdAt: normalizeTimestamp(dbShift.created_at),
     updatedAt: normalizeTimestamp(dbShift.updated_at),
@@ -310,6 +324,8 @@ function buildAdminResolutionLogs({
   actorUserId,
   shiftId,
   eventTimestamp,
+  previousPayrollStatus,
+  payrollStatus,
   reviewStatus,
   reviewNote,
   closeOpenShiftAt,
@@ -363,7 +379,107 @@ function buildAdminResolutionLogs({
     });
   }
 
+  if (payrollStatus && payrollStatus !== previousPayrollStatus) {
+    if (payrollStatus === "approved") {
+      logs.push({
+        id: crypto.randomUUID(),
+        userId: actorUserId,
+        shiftId,
+        actionType: ADMIN_RESOLUTION_ACTIONS.approvePayroll,
+        timestamp: eventTimestamp,
+        notes: `Shift approved for payroll. ${reviewNote}`.trim(),
+      });
+    }
+
+    if (payrollStatus === "exported") {
+      logs.push({
+        id: crypto.randomUUID(),
+        userId: actorUserId,
+        shiftId,
+        actionType: ADMIN_RESOLUTION_ACTIONS.exportPayroll,
+        timestamp: eventTimestamp,
+        notes: `Shift marked exported to payroll. ${reviewNote}`.trim(),
+      });
+    }
+
+    if (payrollStatus === "pending" && previousPayrollStatus !== "pending") {
+      logs.push({
+        id: crypto.randomUUID(),
+        userId: actorUserId,
+        shiftId,
+        actionType: ADMIN_RESOLUTION_ACTIONS.reopenPayroll,
+        timestamp: eventTimestamp,
+        notes: `Shift returned to pending payroll review. ${reviewNote}`.trim(),
+      });
+    }
+  }
+
   return logs;
+}
+
+function buildPayrollStateTransition(currentShift, actorUserId, eventTimestamp, resolution, finalReviewStatus, finalClockOutAt) {
+  const currentPayrollStatus = normalizePayrollStatus(currentShift.payrollStatus);
+  const requestedPayrollStatus = resolution.payrollStatus
+    ? normalizePayrollStatus(resolution.payrollStatus)
+    : currentPayrollStatus;
+
+  if (requestedPayrollStatus === currentPayrollStatus) {
+    return {
+      payrollStatus: currentPayrollStatus,
+      payrollApprovedBy: currentShift.payrollApprovedBy || null,
+      payrollApprovedAt: currentShift.payrollApprovedAt || null,
+      payrollExportedBy: currentShift.payrollExportedBy || null,
+      payrollExportedAt: currentShift.payrollExportedAt || null,
+      changed: false,
+      previousPayrollStatus: currentPayrollStatus,
+    };
+  }
+
+  if (!finalClockOutAt) {
+    throw new HttpError(400, "Payroll status can only be changed on a closed shift");
+  }
+
+  if (finalReviewStatus !== "reviewed") {
+    throw new HttpError(400, "Payroll status can only be changed after the shift is reviewed");
+  }
+
+  if (requestedPayrollStatus === "exported" && currentPayrollStatus !== "approved") {
+    throw new HttpError(409, "Shift must be payroll approved before it can be marked exported");
+  }
+
+  if (requestedPayrollStatus === "pending") {
+    return {
+      payrollStatus: "pending",
+      payrollApprovedBy: null,
+      payrollApprovedAt: null,
+      payrollExportedBy: null,
+      payrollExportedAt: null,
+      changed: true,
+      previousPayrollStatus: currentPayrollStatus,
+    };
+  }
+
+  if (requestedPayrollStatus === "approved") {
+    return {
+      payrollStatus: "approved",
+      payrollApprovedBy: actorUserId,
+      payrollApprovedAt: eventTimestamp,
+      payrollExportedBy: null,
+      payrollExportedAt: null,
+      changed: true,
+      previousPayrollStatus: currentPayrollStatus,
+    };
+  }
+
+  return {
+    payrollStatus: "exported",
+    payrollApprovedBy: currentShift.payrollApprovedBy || actorUserId,
+    payrollApprovedAt: currentShift.payrollApprovedAt || eventTimestamp,
+    payrollExportedBy: actorUserId,
+    payrollExportedAt: eventTimestamp,
+    changed: true,
+    previousPayrollStatus: currentPayrollStatus,
+  };
 }
 
 export async function applyAdminShiftResolution(shiftId, actorUserId, resolution = {}) {
@@ -414,15 +530,30 @@ export async function applyAdminShiftResolution(shiftId, actorUserId, resolution
       throw new HttpError(400, "Payable hours can only be set on a closed shift");
     }
 
+    const finalReviewStatus = resolution.reviewStatus || shift.reviewStatus || null;
+    const payrollState = buildPayrollStateTransition(
+      shift,
+      actorUserId,
+      eventTimestamp,
+      resolution,
+      finalReviewStatus,
+      shift.clockOutAt
+    );
+
     shift.actualHours = summary.actualHours;
     shift.payableHours =
       resolution.payableHours !== null && resolution.payableHours !== undefined
         ? resolution.payableHours
         : summary.payableHours;
-    shift.reviewStatus = resolution.reviewStatus || shift.reviewStatus || null;
+    shift.reviewStatus = finalReviewStatus;
     shift.reviewNote = resolution.reviewNote;
     shift.reviewedBy = actorUserId;
     shift.reviewedAt = eventTimestamp;
+    shift.payrollStatus = payrollState.payrollStatus;
+    shift.payrollApprovedBy = payrollState.payrollApprovedBy;
+    shift.payrollApprovedAt = payrollState.payrollApprovedAt;
+    shift.payrollExportedBy = payrollState.payrollExportedBy;
+    shift.payrollExportedAt = payrollState.payrollExportedAt;
     shift.updatedAt = eventTimestamp;
 
     if (!Array.isArray(db.timeLogs)) db.timeLogs = [];
@@ -431,6 +562,8 @@ export async function applyAdminShiftResolution(shiftId, actorUserId, resolution
         actorUserId,
         shiftId,
         eventTimestamp,
+        previousPayrollStatus: payrollState.previousPayrollStatus,
+        payrollStatus: payrollState.payrollStatus,
         reviewStatus: shift.reviewStatus,
         reviewNote: resolution.reviewNote,
         closeOpenShiftAt: shift.clockOutAt && resolution.closeOpenShiftAt ? shift.clockOutAt : null,
@@ -514,6 +647,15 @@ export async function applyAdminShiftResolution(shiftId, actorUserId, resolution
         resolution.payableHours !== null && resolution.payableHours !== undefined
           ? resolution.payableHours
           : summary.payableHours;
+      const finalReviewStatus = resolution.reviewStatus || currentShift.reviewStatus || null;
+      const payrollState = buildPayrollStateTransition(
+        currentShift,
+        actorUserId,
+        eventTimestamp,
+        resolution,
+        finalReviewStatus,
+        nextShift.clockOutAt
+      );
 
       await client.query(
         `UPDATE shifts
@@ -524,16 +666,26 @@ export async function applyAdminShiftResolution(shiftId, actorUserId, resolution
             review_note = $5,
             reviewed_by = $6,
             reviewed_at = $7,
-            updated_at = $8
-        WHERE id = $9`,
+            payroll_status = $8,
+            payroll_approved_by = $9,
+            payroll_approved_at = $10,
+            payroll_exported_by = $11,
+            payroll_exported_at = $12,
+            updated_at = $13
+        WHERE id = $14`,
         [
           nextShift.clockOutAt,
           summary.actualHours,
           finalPayableHours,
-          resolution.reviewStatus || currentShift.reviewStatus || null,
+          finalReviewStatus,
           resolution.reviewNote,
           actorUserId,
           eventTimestamp,
+          payrollState.payrollStatus,
+          payrollState.payrollApprovedBy,
+          payrollState.payrollApprovedAt,
+          payrollState.payrollExportedBy,
+          payrollState.payrollExportedAt,
           eventTimestamp,
           shiftId,
         ]
@@ -543,7 +695,9 @@ export async function applyAdminShiftResolution(shiftId, actorUserId, resolution
         actorUserId,
         shiftId,
         eventTimestamp,
-        reviewStatus: resolution.reviewStatus || currentShift.reviewStatus || null,
+        previousPayrollStatus: payrollState.previousPayrollStatus,
+        payrollStatus: payrollState.payrollStatus,
+        reviewStatus: finalReviewStatus,
         reviewNote: resolution.reviewNote,
         closeOpenShiftAt: resolution.closeOpenShiftAt ? nextShift.clockOutAt : null,
         closeActiveBreakAt: closeActiveBreakAt ? ensureIsoTimestamp(closeActiveBreakAt, "closeActiveBreakAt") : null,
@@ -588,6 +742,11 @@ export async function saveClockIn(userId, notes = null, location = null, geofenc
       businessTimeZone: resolvedBusinessTimeZone,
       actualHours: null,
       payableHours: null,
+      payrollStatus: "pending",
+      payrollApprovedBy: null,
+      payrollApprovedAt: null,
+      payrollExportedBy: null,
+      payrollExportedAt: null,
       breaks: [],
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -664,6 +823,11 @@ export async function saveClockIn(userId, notes = null, location = null, geofenc
         clockOutAt: null,
         businessDate,
         businessTimeZone: resolvedBusinessTimeZone,
+        payrollStatus: "pending",
+        payrollApprovedBy: null,
+        payrollApprovedAt: null,
+        payrollExportedBy: null,
+        payrollExportedAt: null,
         breaks: [],
         createdAt: timestamp,
         updatedAt: timestamp,

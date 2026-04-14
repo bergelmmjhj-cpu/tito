@@ -294,6 +294,9 @@ function toActionLabel(actionType) {
   if (actionType === "admin_close_shift") return "Manager Closed Shift";
   if (actionType === "admin_end_break") return "Manager Ended Break";
   if (actionType === "admin_payable_adjustment") return "Manager Adjusted Payable Hours";
+  if (actionType === "admin_payroll_approved") return "Payroll Approved";
+  if (actionType === "admin_payroll_exported") return "Payroll Exported";
+  if (actionType === "admin_payroll_reopened") return "Payroll Reopened";
   return actionType || "—";
 }
 
@@ -1641,8 +1644,10 @@ const tsDateToEl = document.getElementById("tsDateTo");
 const tsSearchEl = document.getElementById("tsSearch");
 const tsWorkplaceFilterEl = document.getElementById("tsWorkplaceFilter");
 const tsStatusFilterEl = document.getElementById("tsStatusFilter");
+const tsPayrollFilterEl = document.getElementById("tsPayrollFilter");
 const applyTimesheetFiltersBtnEl = document.getElementById("applyTimesheetFiltersBtn");
 const clearTimesheetFiltersBtnEl = document.getElementById("clearTimesheetFiltersBtn");
+const timesheetSummaryCardsEl = document.getElementById("timesheetSummaryCards");
 const timesheetsBodyEl = document.getElementById("timesheetsBody");
 const timesheetsPaginationEl = document.getElementById("timesheetsPagination");
 const timesheetErrorEl = document.getElementById("timesheetError");
@@ -1656,13 +1661,19 @@ const closeTimesheetDetailBtnEl = document.getElementById("closeTimesheetDetailB
 let timesheetsCurrentPage = 1;
 let timesheetsLastFilters = {};
 
-function buildTimesheetQueryString(filters, page) {
+function buildTimesheetFilterQueryString(filters) {
   const params = new URLSearchParams();
   if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
   if (filters.dateTo) params.set("dateTo", filters.dateTo);
   if (filters.search) params.set("search", filters.search);
   if (filters.workplaceId) params.set("workplaceId", filters.workplaceId);
   if (filters.status) params.set("status", filters.status);
+  if (filters.payrollStatus) params.set("payrollStatus", filters.payrollStatus);
+  return params.toString();
+}
+
+function buildTimesheetQueryString(filters, page) {
+  const params = new URLSearchParams(buildTimesheetFilterQueryString(filters));
   params.set("page", String(page || 1));
   params.set("limit", "50");
   return params.toString();
@@ -1675,6 +1686,7 @@ function readTimesheetFilters() {
     search: tsSearchEl.value.trim(),
     workplaceId: tsWorkplaceFilterEl.value || "",
     status: tsStatusFilterEl.value || "",
+    payrollStatus: tsPayrollFilterEl.value || "",
   };
 }
 
@@ -1684,6 +1696,7 @@ function clearTimesheetFilters() {
   tsSearchEl.value = "";
   tsWorkplaceFilterEl.value = "";
   tsStatusFilterEl.value = "";
+  tsPayrollFilterEl.value = "";
 }
 
 function statusBadgeHtml(status) {
@@ -1711,6 +1724,18 @@ function toReviewStateLabel(reviewStatus, reviewPending) {
   return "—";
 }
 
+function toPayrollStateLabel(payrollStatus) {
+  if (payrollStatus === "approved") {
+    return `<span class="status-badge-payroll-approved">Approved</span>`;
+  }
+
+  if (payrollStatus === "exported") {
+    return `<span class="status-badge-payroll-exported">Exported</span>`;
+  }
+
+  return `<span class="status-badge-payroll-pending">Pending</span>`;
+}
+
 function buildTimesheetAttentionItems(ts) {
   const items = [
     ts.outsideGeofence ? "Outside workplace area" : null,
@@ -1718,6 +1743,7 @@ function buildTimesheetAttentionItems(ts) {
     ts.status === "missing_break_end" ? "Missing break end" : null,
     ts.status === "open_shift" ? "Open shift" : null,
     ts.noLocation ? "No location" : null,
+    ts.readyForPayroll && ts.payrollStatus === "pending" ? "Ready for payroll" : null,
   ].filter(Boolean);
 
   const reviewLabel = toReviewStateLabel(ts.reviewStatus, ts.reviewPending);
@@ -1733,9 +1759,50 @@ function formatBreakList(arr) {
   return arr.map(formatDateTime).join("<br>");
 }
 
+function renderTimesheetSummary(summary) {
+  if (!summary?.totals || !summary?.payroll) {
+    timesheetSummaryCardsEl.innerHTML = "";
+    return;
+  }
+
+  const cards = [
+    {
+      label: "Filtered Shifts",
+      value: summary.totals.shiftCount,
+      meta: `${summary.totals.completedShiftCount} completed`,
+    },
+    {
+      label: "Ready For Payroll",
+      value: summary.payroll.readyForPayrollCount,
+      meta: `${summary.payroll.pendingCount} pending in this view`,
+    },
+    {
+      label: "Approved Payroll",
+      value: summary.payroll.approvedCount,
+      meta: `${formatHours(summary.payroll.approvedPayableHours)} approved hours`,
+    },
+    {
+      label: "Exported Payroll",
+      value: summary.payroll.exportedCount,
+      meta: `${formatHours(summary.payroll.exportedPayableHours)} exported hours`,
+    },
+  ];
+
+  timesheetSummaryCardsEl.innerHTML = cards
+    .map(
+      (card) => `
+        <div class="timesheet-summary-card">
+          <div class="eyebrow">${card.label}</div>
+          <div class="value">${card.value}</div>
+          <div class="meta">${card.meta}</div>
+        </div>`
+    )
+    .join("");
+}
+
 function renderTimesheets(timesheets) {
   if (!Array.isArray(timesheets) || timesheets.length === 0) {
-    timesheetsBodyEl.innerHTML = `<tr><td colspan="9" class="muted">No timesheets found.</td></tr>`;
+    timesheetsBodyEl.innerHTML = `<tr><td colspan="10" class="muted">No timesheets found.</td></tr>`;
     return;
   }
 
@@ -1752,6 +1819,7 @@ function renderTimesheets(timesheets) {
         <td>${formatDateTime(ts.clockOutAt)}</td>
         <td>${formatHours(ts.actualHours)}</td>
         <td>${statusBadgeHtml(ts.status)}</td>
+        <td>${toPayrollStateLabel(ts.payrollStatus)}</td>
         <td>${attention.length ? attention.join(", ") : "—"}</td>
         <td>${noteText}</td>
       </tr>`;
@@ -1788,13 +1856,18 @@ async function loadTimesheets(filters, page) {
   timesheetsCurrentPage = page || 1;
 
   const qs = buildTimesheetQueryString(filters, timesheetsCurrentPage);
-  const data = await apiFetch(`/api/admin/timesheets?${qs}`);
+  const summaryQs = buildTimesheetFilterQueryString(filters);
+  const [data, summaryData] = await Promise.all([
+    apiFetch(`/api/admin/timesheets?${qs}`),
+    apiFetch(`/api/admin/timesheets/summary/payroll${summaryQs ? "?" + summaryQs : ""}`).catch(() => null),
+  ]);
   console.info("[timesheets] response", {
     filters,
     page: timesheetsCurrentPage,
     rowCount: Array.isArray(data?.timesheets) ? data.timesheets.length : 0,
     pagination: data?.pagination || null,
   });
+  renderTimesheetSummary(summaryData?.summary || null);
   renderTimesheets(data?.timesheets || []);
   renderTimesheetsPagination(data?.pagination || null);
 }
@@ -1820,6 +1893,7 @@ async function populateWorkplaceFilter() {
 async function initTimesheetsScreen() {
   setError(timesheetErrorEl, "");
   setInlineFeedback(timesheetActionMessageEl, "", "info");
+  renderTimesheetSummary(null);
   clearTimesheetFilters();
   timesheetDetailPanelEl.classList.add("hidden");
   await populateWorkplaceFilter();
@@ -1852,6 +1926,7 @@ function renderTimesheetDetail(detail) {
   const currentPayablePlaceholder =
     typeof detail.payableHours === "number" ? detail.payableHours.toFixed(2) : "";
   const defaultReviewStatus = detail.reviewStatus === "follow_up_required" ? "follow_up_required" : "reviewed";
+  const defaultPayrollStatus = detail.payrollStatus || "pending";
 
   const summaryHtml = `
     <div class="detail-grid">
@@ -1877,6 +1952,11 @@ function renderTimesheetDetail(detail) {
       ${field("Review Status", reviewLabel)}
       ${field("Reviewed By", detail.reviewedByName || "—")}
       ${field("Reviewed At", formatDateTime(detail.reviewedAt))}
+      ${field("Payroll Status", toPayrollStateLabel(detail.payrollStatus))}
+      ${field("Payroll Approved By", detail.payrollApprovedByName || "—")}
+      ${field("Payroll Approved At", formatDateTime(detail.payrollApprovedAt))}
+      ${field("Payroll Exported By", detail.payrollExportedByName || "—")}
+      ${field("Payroll Exported At", formatDateTime(detail.payrollExportedAt))}
       ${field("Payable Adjusted", detail.payableHoursAdjusted ? "Yes" : "No")}
       ${field("Review Note", detail.reviewNote || "—")}
       ${field("Clock-In Notes", detail.clockInNotes || "—")}
@@ -1886,13 +1966,22 @@ function renderTimesheetDetail(detail) {
   const resolutionHtml = `
     <section class="resolution-panel">
       <h3>Resolution Tools</h3>
-      <p class="detail-note">Use these actions to close operational exceptions and leave a manager audit note.</p>
+      <p class="detail-note">Use these actions to close operational exceptions, leave a manager audit note, and control payroll readiness. Exported status requires a closed, reviewed, already approved shift.</p>
       <form id="timesheetResolutionForm" class="resolution-form" data-shiftid="${detail.shiftId}">
         <label>
           Review Status
           <select name="reviewStatus">
             <option value="reviewed" ${defaultReviewStatus === "reviewed" ? "selected" : ""}>Reviewed</option>
             <option value="follow_up_required" ${defaultReviewStatus === "follow_up_required" ? "selected" : ""}>Follow-up required</option>
+          </select>
+        </label>
+
+        <label>
+          Payroll Status
+          <select name="payrollStatus">
+            <option value="pending" ${defaultPayrollStatus === "pending" ? "selected" : ""}>Pending</option>
+            <option value="approved" ${defaultPayrollStatus === "approved" ? "selected" : ""}>Approved for payroll</option>
+            <option value="exported" ${defaultPayrollStatus === "exported" ? "selected" : ""}>Exported to payroll</option>
           </select>
         </label>
 
@@ -2022,6 +2111,7 @@ async function submitTimesheetResolution(form) {
   const formData = new FormData(form);
   const payload = {
     reviewStatus: String(formData.get("reviewStatus") || "").trim() || undefined,
+    payrollStatus: String(formData.get("payrollStatus") || "").trim() || undefined,
     reviewNote: String(formData.get("reviewNote") || "").trim() || undefined,
   };
 
@@ -2076,6 +2166,7 @@ exportTimesheetsCsvBtnEl.addEventListener("click", () => {
   if (filters.search) params.set("search", filters.search);
   if (filters.workplaceId) params.set("workplaceId", filters.workplaceId);
   if (filters.status) params.set("status", filters.status);
+  if (filters.payrollStatus) params.set("payrollStatus", filters.payrollStatus);
   const qs = params.toString();
 
   apiFetch(`/api/admin/timesheets/export/csv${qs ? "?" + qs : ""}`, { headers: { Accept: "text/csv" } })

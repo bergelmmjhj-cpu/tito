@@ -280,7 +280,7 @@
             <button id="refreshTimesheetsBtn" type="button" class="ghost">Refresh</button>
           </div>
         </div>
-        <p class="muted">Track worker hours by hotel business date and quickly find shifts that need attention.</p>
+        <p class="muted">Track worker hours by hotel business date, resolve issues, and manage payroll readiness.</p>
         <div class="filter-panel">
           <label>Date From<input id="tsDateFrom" type="date" /></label>
           <label>Date To<input id="tsDateTo" type="date" /></label>
@@ -305,11 +305,20 @@
               <option value="low_accuracy">Low accuracy (&gt;50 m)</option>
             </select>
           </label>
+          <label>Payroll
+            <select id="tsPayrollFilter">
+              <option value="">All payroll states</option>
+              <option value="pending">Pending</option>
+              <option value="approved">Approved</option>
+              <option value="exported">Exported</option>
+            </select>
+          </label>
           <div class="filter-actions">
             <button id="applyTimesheetFiltersBtn" type="button">Apply Filters</button>
             <button id="clearTimesheetFiltersBtn" type="button" class="ghost">Clear</button>
           </div>
         </div>
+        <div id="timesheetSummaryCards" class="timesheet-summary-grid"></div>
         <p id="timesheetError" class="error hidden"></p>
         <div class="table-wrap">
           <table>
@@ -322,12 +331,13 @@
                 <th>Clock Out</th>
                 <th>Total Hours</th>
                 <th>Status</th>
+                <th>Payroll</th>
                 <th>Attention</th>
                 <th>Notes</th>
               </tr>
             </thead>
             <tbody id="timesheetsBody">
-              <tr><td colspan="9" class="muted">No timesheets loaded.</td></tr>
+              <tr><td colspan="10" class="muted">No timesheets loaded.</td></tr>
             </tbody>
           </table>
         </div>

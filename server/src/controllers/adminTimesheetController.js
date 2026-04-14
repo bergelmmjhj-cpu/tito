@@ -107,6 +107,7 @@ export async function resolveTimesheetController(req, res) {
       shiftId: req.params.shiftId,
       body: {
         reviewStatus: req.body?.reviewStatus || null,
+        payrollStatus: req.body?.payrollStatus || null,
         hasReviewNote: Boolean(req.body?.reviewNote),
         hasCloseOpenShiftAt: Boolean(req.body?.closeOpenShiftAt),
         hasCloseActiveBreakAt: Boolean(req.body?.closeActiveBreakAt),

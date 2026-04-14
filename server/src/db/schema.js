@@ -84,12 +84,18 @@ const CREATE_TABLES_SQL = `
     review_note TEXT,
     reviewed_by TEXT REFERENCES users(id) ON DELETE SET NULL,
     reviewed_at TIMESTAMP,
+    payroll_status VARCHAR(50) DEFAULT 'pending',
+    payroll_approved_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    payroll_approved_at TIMESTAMP,
+    payroll_exported_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    payroll_exported_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
 
   CREATE INDEX IF NOT EXISTS idx_shifts_user_id ON shifts(user_id);
   CREATE INDEX IF NOT EXISTS idx_shifts_clock_in_at ON shifts(clock_in_at);
+  CREATE INDEX IF NOT EXISTS idx_shifts_payroll_status ON shifts(payroll_status);
   CREATE UNIQUE INDEX IF NOT EXISTS uq_shifts_one_open_per_user ON shifts(user_id) WHERE clock_out_at IS NULL;
 
   -- Breaks table
@@ -108,7 +114,7 @@ const CREATE_TABLES_SQL = `
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     shift_id TEXT NOT NULL REFERENCES shifts(id) ON DELETE CASCADE,
-    action_type VARCHAR(50) NOT NULL CHECK (action_type IN ('clock_in', 'break_start', 'break_end', 'clock_out', 'admin_review', 'admin_close_shift', 'admin_end_break', 'admin_payable_adjustment')),
+    action_type VARCHAR(50) NOT NULL CHECK (action_type IN ('clock_in', 'break_start', 'break_end', 'clock_out', 'admin_review', 'admin_close_shift', 'admin_end_break', 'admin_payable_adjustment', 'admin_payroll_approved', 'admin_payroll_exported', 'admin_payroll_reopened')),
     timestamp TIMESTAMP NOT NULL,
     location JSONB,
     geofence JSONB,

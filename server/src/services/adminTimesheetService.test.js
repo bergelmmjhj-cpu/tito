@@ -33,3 +33,26 @@ test("parseTimesheetResolutionPayload normalizes timestamps and payable hours", 
   assert.equal(parsed.payableHours, 7.5);
   assert.equal(parsed.hasOperationalChange, true);
 });
+
+test("parseTimesheetResolutionPayload accepts payroll status updates", () => {
+  const parsed = parseTimesheetResolutionPayload({
+    reviewStatus: "reviewed",
+    payrollStatus: "approved",
+    reviewNote: "Cleared for payroll.",
+  });
+
+  assert.equal(parsed.payrollStatus, "approved");
+  assert.equal(parsed.hasOperationalChange, true);
+});
+
+test("parseTimesheetResolutionPayload rejects invalid payroll statuses", () => {
+  assert.throws(
+    () =>
+      parseTimesheetResolutionPayload({
+        reviewStatus: "reviewed",
+        payrollStatus: "processing",
+        reviewNote: "Invalid payroll status.",
+      }),
+    /payrollStatus must be one of/
+  );
+});

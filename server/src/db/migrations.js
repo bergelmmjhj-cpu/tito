@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { createPasswordHash } from "../utils/password.js";
 import { buildShiftHourSummary } from "../services/payableHoursService.js";
 
-export const CURRENT_SCHEMA_VERSION = 5;
+export const CURRENT_SCHEMA_VERSION = 6;
 
 const DEFAULT_BOOTSTRAP_ADMIN = {
   firstName: "System",
@@ -236,6 +236,42 @@ export function migrateDatabase(db) {
       businessTimeZone:
         typeof shift.businessTimeZone === "string" && shift.businessTimeZone.trim()
           ? shift.businessTimeZone.trim()
+          : null,
+      reviewStatus:
+        typeof shift.reviewStatus === "string" && shift.reviewStatus.trim()
+          ? shift.reviewStatus.trim()
+          : null,
+      reviewNote:
+        typeof shift.reviewNote === "string" && shift.reviewNote.trim()
+          ? shift.reviewNote.trim()
+          : null,
+      reviewedBy:
+        typeof shift.reviewedBy === "string" && shift.reviewedBy.trim()
+          ? shift.reviewedBy.trim()
+          : null,
+      reviewedAt:
+        typeof shift.reviewedAt === "string" && shift.reviewedAt.trim()
+          ? shift.reviewedAt.trim()
+          : null,
+      payrollStatus:
+        shift.payrollStatus === "approved" || shift.payrollStatus === "exported"
+          ? shift.payrollStatus
+          : "pending",
+      payrollApprovedBy:
+        typeof shift.payrollApprovedBy === "string" && shift.payrollApprovedBy.trim()
+          ? shift.payrollApprovedBy.trim()
+          : null,
+      payrollApprovedAt:
+        typeof shift.payrollApprovedAt === "string" && shift.payrollApprovedAt.trim()
+          ? shift.payrollApprovedAt.trim()
+          : null,
+      payrollExportedBy:
+        typeof shift.payrollExportedBy === "string" && shift.payrollExportedBy.trim()
+          ? shift.payrollExportedBy.trim()
+          : null,
+      payrollExportedAt:
+        typeof shift.payrollExportedAt === "string" && shift.payrollExportedAt.trim()
+          ? shift.payrollExportedAt.trim()
           : null,
       actualHours:
         typeof shift.actualHours === "number" && Number.isFinite(shift.actualHours)

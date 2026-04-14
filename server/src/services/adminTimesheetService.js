@@ -16,6 +16,7 @@ const LOW_ACCURACY_THRESHOLD_METERS = 50;
 const DEFAULT_PAGE_LIMIT = 50;
 const MAX_PAGE_LIMIT = 200;
 const REVIEW_STATUSES = new Set(["reviewed", "follow_up_required"]);
+const PAYROLL_STATUSES = new Set(["pending", "approved", "exported"]);
 const ADMIN_REVIEW_NOTE_MAX_LENGTH = 1000;
 
 // ---------------------------------------------------------------------------
@@ -135,6 +136,14 @@ function buildTimesheetRow(shift, user, shiftLogs, workplaceIndex, userIndex = {
   const reviewStatus = shift?.reviewStatus || null;
   const reviewPending = hasException && !reviewStatus;
   const reviewedByName = shift?.reviewedBy ? userIndex[shift.reviewedBy]?.name || null : null;
+  const payrollStatus = PAYROLL_STATUSES.has(shift?.payrollStatus) ? shift.payrollStatus : "pending";
+  const payrollApprovedByName = shift?.payrollApprovedBy
+    ? userIndex[shift.payrollApprovedBy]?.name || null
+    : null;
+  const payrollExportedByName = shift?.payrollExportedBy
+    ? userIndex[shift.payrollExportedBy]?.name || null
+    : null;
+  const readyForPayroll = status === "completed" && reviewStatus === "reviewed";
 
   return {
     shiftId: shift.id,
@@ -183,6 +192,14 @@ function buildTimesheetRow(shift, user, shiftLogs, workplaceIndex, userIndex = {
     reviewedAt: shift?.reviewedAt || null,
     reviewedByUserId: shift?.reviewedBy || null,
     reviewedByName,
+    payrollStatus,
+    readyForPayroll,
+    payrollApprovedByUserId: shift?.payrollApprovedBy || null,
+    payrollApprovedByName,
+    payrollApprovedAt: shift?.payrollApprovedAt || null,
+    payrollExportedByUserId: shift?.payrollExportedBy || null,
+    payrollExportedByName,
+    payrollExportedAt: shift?.payrollExportedAt || null,
     clockInNotes: clockInLog?.notes || null,
     clockOutNotes: clockOutLog?.notes || null,
     createdAt: shift.createdAt || null,
@@ -214,6 +231,11 @@ function matchesStatus(row, status) {
   if (status === "reviewed") return row.reviewStatus === "reviewed";
   if (status === "follow_up_required") return row.reviewStatus === "follow_up_required";
   return row.status === status;
+}
+
+function matchesPayrollStatus(row, payrollStatus) {
+  if (!payrollStatus) return true;
+  return row.payrollStatus === payrollStatus;
 }
 
 function normalizeReviewStatus(value) {
@@ -257,6 +279,15 @@ function parseOptionalPayableHours(value) {
   return Number(parsed.toFixed(2));
 }
 
+function parseOptionalPayrollStatus(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (!PAYROLL_STATUSES.has(normalized)) {
+    throw new HttpError(400, "payrollStatus must be one of: pending, approved, exported");
+  }
+  return normalized;
+}
+
 function parseDate(value) {
   if (!value || typeof value !== "string") return null;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return null;
@@ -290,6 +321,7 @@ async function getFilteredTimesheetRows(filters) {
     if (filters.search && !matchesSearch(row, filters.search)) return false;
     if (filters.workplaceId && row.workplaceId !== filters.workplaceId) return false;
     if (filters.status && !matchesStatus(row, filters.status)) return false;
+    if (filters.payrollStatus && !matchesPayrollStatus(row, filters.payrollStatus)) return false;
     if (filters.dateFrom && (!row.date || row.date < filters.dateFrom)) return false;
     if (filters.dateTo && (!row.date || row.date > filters.dateTo)) return false;
     return true;
@@ -311,6 +343,7 @@ export function parseTimesheetFilters(query) {
     search,
     workplaceId,
     status,
+    payrollStatus,
     page,
     limit,
   } = query || {};
@@ -335,6 +368,10 @@ export function parseTimesheetFilters(query) {
     "",
   ]);
   const cleanStatus = typeof status === "string" && allowedStatuses.has(status) ? status : "";
+  const cleanPayrollStatus =
+    typeof payrollStatus === "string" && PAYROLL_STATUSES.has(payrollStatus.trim().toLowerCase())
+      ? payrollStatus.trim().toLowerCase()
+      : "";
 
   const dateFromParsed = parseDate(dateFrom);
   const dateToParsed = parseDate(dateTo);
@@ -358,6 +395,7 @@ export function parseTimesheetFilters(query) {
     search: typeof search === "string" && search.trim() ? search.trim() : null,
     workplaceId: typeof workplaceId === "string" && workplaceId.trim() ? workplaceId.trim() : null,
     status: cleanStatus,
+    payrollStatus: cleanPayrollStatus,
     page: parsedPage,
     limit: parsedLimit,
   };
@@ -416,6 +454,7 @@ export async function getAdminPayrollSummary(filters) {
       search: filters.search,
       workplaceId: filters.workplaceId,
       status: filters.status,
+      payrollStatus: filters.payrollStatus,
     },
     totals: {
       shiftCount: rows.length,
@@ -423,6 +462,24 @@ export async function getAdminPayrollSummary(filters) {
       totalActualHours,
       totalPayableHours,
       payableDeltaHours: Number((totalPayableHours - totalActualHours).toFixed(2)),
+    },
+    payroll: {
+      readyForPayrollCount: rows.filter((row) => row.readyForPayroll && row.payrollStatus === "pending").length,
+      pendingCount: rows.filter((row) => row.payrollStatus === "pending").length,
+      approvedCount: rows.filter((row) => row.payrollStatus === "approved").length,
+      exportedCount: rows.filter((row) => row.payrollStatus === "exported").length,
+      approvedPayableHours: Number(
+        rows
+          .filter((row) => row.payrollStatus === "approved")
+          .reduce((sum, row) => sum + (row.payableHours || 0), 0)
+          .toFixed(2)
+      ),
+      exportedPayableHours: Number(
+        rows
+          .filter((row) => row.payrollStatus === "exported")
+          .reduce((sum, row) => sum + (row.payableHours || 0), 0)
+          .toFixed(2)
+      ),
     },
   };
 }
@@ -475,9 +532,10 @@ export function parseTimesheetResolutionPayload(payload = {}) {
   const closeOpenShiftAt = parseOptionalIsoDateTime(payload.closeOpenShiftAt, "closeOpenShiftAt");
   const closeActiveBreakAt = parseOptionalIsoDateTime(payload.closeActiveBreakAt, "closeActiveBreakAt");
   const payableHours = parseOptionalPayableHours(payload.payableHours);
+  const payrollStatus = parseOptionalPayrollStatus(payload.payrollStatus);
 
   const hasOperationalChange = Boolean(
-    closeOpenShiftAt || closeActiveBreakAt || payableHours !== null
+    closeOpenShiftAt || closeActiveBreakAt || payableHours !== null || payrollStatus
   );
 
   if (!reviewStatus && !hasOperationalChange) {
@@ -492,6 +550,7 @@ export function parseTimesheetResolutionPayload(payload = {}) {
     closeOpenShiftAt,
     closeActiveBreakAt,
     payableHours,
+    payrollStatus,
     hasOperationalChange,
   };
 }
@@ -545,6 +604,11 @@ const CSV_COLUMNS = [
   { header: "Review Note", key: "reviewNote" },
   { header: "Reviewed At", key: "reviewedAt" },
   { header: "Reviewed By", key: "reviewedByName" },
+  { header: "Payroll Status", key: "payrollStatus" },
+  { header: "Payroll Approved At", key: "payrollApprovedAt" },
+  { header: "Payroll Approved By", key: "payrollApprovedByName" },
+  { header: "Payroll Exported At", key: "payrollExportedAt" },
+  { header: "Payroll Exported By", key: "payrollExportedByName" },
   { header: "Clock In Notes", key: "clockInNotes" },
   { header: "Clock Out Notes", key: "clockOutNotes" },
 ];
