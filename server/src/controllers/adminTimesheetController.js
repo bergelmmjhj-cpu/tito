@@ -1,12 +1,15 @@
 import {
   createAdminPayrollExportBatch,
   buildTimesheetsCsv,
+  getAdminPayrollExportBatchDetail,
   getAdminPayrollExportBatchCsv,
   getAdminPayrollSummary,
   getAdminTimesheetDetail,
   listAdminPayrollExportBatches,
   listAdminTimesheets,
   parseTimesheetFilters,
+  reopenAdminPayrollExportBatch,
+  reissueAdminPayrollExportBatch,
   resolveAdminTimesheet,
 } from "../services/adminTimesheetService.js";
 import { toHttpError } from "../utils/errors.js";
@@ -122,6 +125,23 @@ export async function listPayrollExportBatchesController(req, res) {
   }
 }
 
+export async function getPayrollExportBatchDetailController(req, res) {
+  try {
+    const batch = await getAdminPayrollExportBatchDetail(req.params.batchId);
+    res.json({ batch });
+  } catch (error) {
+    console.error("[admin.payroll-exports.detail] failed", {
+      adminUserId: req.user?.id || null,
+      batchId: req.params.batchId,
+      message: error?.message || "unknown_error",
+      name: error?.name || "Error",
+      stack: error?.stack || "no_stack",
+    });
+    const err = toHttpError(error);
+    res.status(err.status).json({ error: err.message });
+  }
+}
+
 export async function createPayrollExportBatchController(req, res) {
   try {
     const filters = parseTimesheetFilters(req.body?.filters || {});
@@ -133,6 +153,40 @@ export async function createPayrollExportBatchController(req, res) {
       body: {
         filters: req.body?.filters || {},
       },
+      message: error?.message || "unknown_error",
+      name: error?.name || "Error",
+      stack: error?.stack || "no_stack",
+    });
+    const err = toHttpError(error);
+    res.status(err.status).json({ error: err.message });
+  }
+}
+
+export async function reopenPayrollExportBatchController(req, res) {
+  try {
+    const batch = await reopenAdminPayrollExportBatch(req.params.batchId, req.body || {}, req.user);
+    res.json({ batch });
+  } catch (error) {
+    console.error("[admin.payroll-exports.reopen] failed", {
+      adminUserId: req.user?.id || null,
+      batchId: req.params.batchId,
+      message: error?.message || "unknown_error",
+      name: error?.name || "Error",
+      stack: error?.stack || "no_stack",
+    });
+    const err = toHttpError(error);
+    res.status(err.status).json({ error: err.message });
+  }
+}
+
+export async function reissuePayrollExportBatchController(req, res) {
+  try {
+    const batch = await reissueAdminPayrollExportBatch(req.params.batchId, req.user);
+    res.status(201).json({ batch });
+  } catch (error) {
+    console.error("[admin.payroll-exports.reissue] failed", {
+      adminUserId: req.user?.id || null,
+      batchId: req.params.batchId,
       message: error?.message || "unknown_error",
       name: error?.name || "Error",
       stack: error?.stack || "no_stack",

@@ -1662,6 +1662,10 @@ const clearTimesheetFiltersBtnEl = document.getElementById("clearTimesheetFilter
 const createPayrollExportBtnEl = document.getElementById("createPayrollExportBtn");
 const timesheetSummaryCardsEl = document.getElementById("timesheetSummaryCards");
 const payrollExportsListEl = document.getElementById("payrollExportsList");
+const payrollExportDetailPanelEl = document.getElementById("payrollExportDetailPanel");
+const payrollExportActionMessageEl = document.getElementById("payrollExportActionMessage");
+const payrollExportDetailContentEl = document.getElementById("payrollExportDetailContent");
+const closePayrollExportDetailBtnEl = document.getElementById("closePayrollExportDetailBtn");
 const timesheetsBodyEl = document.getElementById("timesheetsBody");
 const timesheetsPaginationEl = document.getElementById("timesheetsPagination");
 const timesheetErrorEl = document.getElementById("timesheetError");
@@ -1674,6 +1678,7 @@ const closeTimesheetDetailBtnEl = document.getElementById("closeTimesheetDetailB
 
 let timesheetsCurrentPage = 1;
 let timesheetsLastFilters = {};
+let currentPayrollExportBatchId = "";
 
 function buildTimesheetFilterQueryString(filters) {
   const params = new URLSearchParams();
@@ -1814,6 +1819,49 @@ function renderTimesheetSummary(summary) {
     .join("");
 }
 
+function toPayrollBatchStatusLabel(status) {
+  if (status === "reopened") {
+    return `<span class="status-badge-batch-reopened">Reopened</span>`;
+  }
+
+  if (status === "replaced") {
+    return `<span class="status-badge-batch-replaced">Replaced</span>`;
+  }
+
+  return `<span class="status-badge-batch-active">Active</span>`;
+}
+
+function toPayrollBatchRelationText(batch) {
+  if (batch?.replacedByBatchId) {
+    return `Replaced by ${batch.replacedByBatchId.slice(0, 8)}`;
+  }
+
+  if (batch?.supersedesBatchId) {
+    return `Reissue of ${batch.supersedesBatchId.slice(0, 8)}`;
+  }
+
+  if (batch?.status === "reopened") {
+    return "Reopened for correction";
+  }
+
+  return "Stored export snapshot";
+}
+
+function formatBatchFilterSummary(filters) {
+  if (!filters || typeof filters !== "object") return "All approved shifts in view";
+
+  const parts = [];
+  if (filters.dateFrom || filters.dateTo) {
+    parts.push(`Dates ${filters.dateFrom || "..."} to ${filters.dateTo || "..."}`);
+  }
+  if (filters.search) parts.push(`Search: ${filters.search}`);
+  if (filters.workplaceId) parts.push(`Workplace filter applied`);
+  if (filters.status) parts.push(`Status: ${filters.status}`);
+  if (filters.payrollStatus) parts.push(`Payroll: ${filters.payrollStatus}`);
+
+  return parts.length ? parts.join(" • ") : "All approved shifts in view";
+}
+
 function renderPayrollExportBatches(batches) {
   if (!Array.isArray(batches) || batches.length === 0) {
     payrollExportsListEl.innerHTML = '<p class="muted">No payroll export batches yet.</p>';
@@ -1831,13 +1879,120 @@ function renderPayrollExportBatches(batches) {
             <div class="payroll-export-title">Batch ${label}</div>
             <div class="payroll-export-meta">${formatDateTime(batch.createdAt)} • ${shiftCount} shifts • ${formatHours(batch.totalPayableHours)} payable hours • ${createdBy}</div>
             <div class="payroll-export-file">${batch.fileName || "Stored CSV snapshot"}</div>
+            <div class="payroll-export-state">${toPayrollBatchStatusLabel(batch.status)} • ${toPayrollBatchRelationText(batch)}</div>
           </div>
           <div class="payroll-export-actions">
+            <button class="ghost tiny" data-action="view-payroll-batch" data-batchid="${batch.id}">View</button>
             <button class="ghost tiny" data-action="download-payroll-batch" data-batchid="${batch.id}" data-filename="${escapeHtml(batch.fileName || "payroll-export.csv")}">Download CSV</button>
           </div>
         </article>`;
     })
     .join("");
+}
+
+function renderPayrollExportDetail(batch) {
+  if (!batch) {
+    currentPayrollExportBatchId = "";
+    payrollExportDetailContentEl.innerHTML = "";
+    setInlineFeedback(payrollExportActionMessageEl, "", "info");
+    payrollExportDetailPanelEl.classList.add("hidden");
+    return;
+  }
+
+  currentPayrollExportBatchId = batch.id || "";
+
+  const field = (label, value) => `
+    <div class="detail-item">
+      <div class="label">${label}</div>
+      <div class="value">${value == null || value === "" ? "—" : value}</div>
+    </div>`;
+
+  const relatedBatchButton = (label, relatedBatch) => {
+    if (!relatedBatch?.id) return "—";
+    return `<button class="ghost tiny detail-link-button" type="button" data-action="view-related-payroll-batch" data-batchid="${relatedBatch.id}">${label} ${relatedBatch.id.slice(0, 8)}</button>`;
+  };
+
+  const summaryHtml = `
+    <div class="detail-grid">
+      ${field("Batch ID", batch.id)}
+      ${field("Status", toPayrollBatchStatusLabel(batch.status))}
+      ${field("Created At", formatDateTime(batch.createdAt))}
+      ${field("Created By", batch.createdByName || "—")}
+      ${field("Shift Count", batch.shiftCount)}
+      ${field("Payable Hours", formatHours(batch.totalPayableHours))}
+      ${field("File Name", batch.fileName || "—")}
+      ${field("Filters", formatBatchFilterSummary(batch.filters))}
+      ${field("Reopened At", formatDateTime(batch.reopenedAt))}
+      ${field("Reopened By", batch.reopenedByName || "—")}
+      ${field("Reopen Note", batch.reopenedNote || "—")}
+      ${field("Supersedes", relatedBatchButton("Batch", batch.supersedesBatch))}
+      ${field("Replaced By", relatedBatchButton("Batch", batch.replacedByBatch))}
+    </div>`;
+
+  const actionsHtml = batch.status === "active"
+    ? `
+      <section class="resolution-panel">
+        <h3>Batch Actions</h3>
+        <p class="detail-note">Reopen this batch when payroll or operations need corrections before a replacement export is created.</p>
+        <form id="payrollExportReopenForm" class="resolution-form" data-batchid="${batch.id}">
+          <label class="full-width">
+            Reopen Note
+            <textarea name="note" maxlength="1000" required placeholder="Explain why this export batch is being reopened."></textarea>
+          </label>
+          <div class="actions">
+            <button type="submit">Reopen Batch</button>
+          </div>
+        </form>
+      </section>`
+    : batch.status === "reopened"
+      ? `
+        <section class="resolution-panel">
+          <h3>Batch Actions</h3>
+          <p class="detail-note">After correcting the reopened shifts, create a replacement export. The replacement batch will be linked back to this batch automatically.</p>
+          <div class="actions">
+            <button type="button" data-action="reissue-payroll-batch" data-batchid="${batch.id}">Create Replacement Export</button>
+          </div>
+        </section>`
+      : `
+        <section class="resolution-panel">
+          <h3>Batch Actions</h3>
+          <p class="detail-note">This batch has already been replaced. Use the linked replacement batch to download the latest snapshot.</p>
+        </section>`;
+
+  const rowsHtml = Array.isArray(batch.rows) && batch.rows.length > 0
+    ? `<h3 style="margin:12px 0 6px">Export Snapshot</h3>
+       <div class="table-wrap">
+         <table class="detail-actions-table">
+           <thead>
+             <tr>
+               <th>Worker</th>
+               <th>Business Date</th>
+               <th>Workplace</th>
+               <th>Payable Hours</th>
+               <th>Status</th>
+               <th>Payroll</th>
+               <th>Shift</th>
+             </tr>
+           </thead>
+           <tbody>
+             ${batch.rows.map((row) => `
+               <tr>
+                 <td>${row.workerName || "—"}</td>
+                 <td>${row.date || "—"}</td>
+                 <td>${row.workplaceName || "—"}</td>
+                 <td>${formatHours(row.payableHours)}</td>
+                 <td>${statusBadgeHtml(row.status)}</td>
+                 <td>${toPayrollStateLabel(row.payrollStatus)}</td>
+                 <td><button class="ghost tiny detail-link-button" type="button" data-action="view-exported-shift" data-shiftid="${row.shiftId}">View Shift</button></td>
+               </tr>`).join("")}
+           </tbody>
+         </table>
+       </div>`
+    : `<p class="muted">No snapshot rows stored for this batch.</p>`;
+
+  payrollExportDetailContentEl.innerHTML = summaryHtml + actionsHtml + rowsHtml;
+  payrollExportDetailPanelEl.classList.remove("hidden");
+  payrollExportDetailPanelEl.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 async function loadPayrollExportBatches() {
@@ -1854,6 +2009,70 @@ async function downloadPayrollExportBatch(batchId, fileName) {
     headers: { Accept: "text/csv" },
   });
   triggerCsvDownload(text, fileName || `payroll-export-${batchId}.csv`);
+}
+
+async function loadPayrollExportBatchDetail(batchId) {
+  setError(timesheetErrorEl, "");
+  setInlineFeedback(payrollExportActionMessageEl, "", "info");
+
+  try {
+    const data = await apiFetch(`/api/admin/payroll-exports/${encodeURIComponent(batchId)}`);
+    renderPayrollExportDetail(data?.batch || null);
+  } catch (error) {
+    setError(timesheetErrorEl, error.message);
+  }
+}
+
+async function submitPayrollExportReopen(form) {
+  const batchId = form.dataset.batchid;
+  if (!batchId) return;
+
+  setError(timesheetErrorEl, "");
+  setInlineFeedback(payrollExportActionMessageEl, "Reopening payroll export batch...", "info");
+
+  const formData = new FormData(form);
+
+  try {
+    const data = await apiFetch(`/api/admin/payroll-exports/${encodeURIComponent(batchId)}/reopen`, {
+      method: "POST",
+      body: JSON.stringify({
+        note: String(formData.get("note") || "").trim() || undefined,
+      }),
+    });
+
+    await Promise.all([loadTimesheets(timesheetsLastFilters, timesheetsCurrentPage), loadPayrollExportBatches()]);
+    renderPayrollExportDetail(data?.batch || null);
+    setInlineFeedback(payrollExportActionMessageEl, `Payroll export ${batchId.slice(0, 8)} reopened.`, "success");
+  } catch (error) {
+    setError(timesheetErrorEl, error.message);
+    setInlineFeedback(payrollExportActionMessageEl, error.message, "error");
+  }
+}
+
+async function createReplacementPayrollExport(batchId) {
+  if (!batchId) return;
+
+  setError(timesheetErrorEl, "");
+  setInlineFeedback(payrollExportActionMessageEl, "Creating replacement payroll export...", "info");
+
+  try {
+    const data = await apiFetch(`/api/admin/payroll-exports/${encodeURIComponent(batchId)}/reissue`, {
+      method: "POST",
+    });
+
+    const batch = data?.batch;
+    if (!batch?.id) {
+      throw new Error("Replacement payroll export batch was created without an id");
+    }
+
+    await Promise.all([loadTimesheets(timesheetsLastFilters, timesheetsCurrentPage), loadPayrollExportBatches()]);
+    renderPayrollExportDetail(batch);
+    setInlineFeedback(payrollExportActionMessageEl, `Replacement payroll export ${batch.id.slice(0, 8)} created.`, "success");
+    await downloadPayrollExportBatch(batch.id, batch.fileName);
+  } catch (error) {
+    setError(timesheetErrorEl, error.message);
+    setInlineFeedback(payrollExportActionMessageEl, error.message, "error");
+  }
 }
 
 function renderTimesheets(timesheets) {
@@ -1951,6 +2170,7 @@ async function initTimesheetsScreen() {
   setInlineFeedback(timesheetActionMessageEl, "", "info");
   renderTimesheetSummary(null);
   renderPayrollExportBatches([]);
+  renderPayrollExportDetail(null);
   clearTimesheetFilters();
   timesheetDetailPanelEl.classList.add("hidden");
   await Promise.all([populateWorkplaceFilter(), loadPayrollExportBatches()]);
@@ -2014,6 +2234,12 @@ function renderTimesheetDetail(detail) {
       ${field("Payroll Approved At", formatDateTime(detail.payrollApprovedAt))}
       ${field("Payroll Exported By", detail.payrollExportedByName || "—")}
       ${field("Payroll Exported At", formatDateTime(detail.payrollExportedAt))}
+      ${field(
+        "Payroll Export Batch",
+        detail.payrollExportBatchId
+          ? `<button class="ghost tiny detail-link-button" type="button" data-action="view-related-payroll-batch" data-batchid="${detail.payrollExportBatchId}">Batch ${detail.payrollExportBatchId.slice(0, 8)}</button>`
+          : "—"
+      )}
       ${field("Payable Adjusted", detail.payableHoursAdjusted ? "Yes" : "No")}
       ${field("Review Note", detail.reviewNote || "—")}
       ${field("Clock-In Notes", detail.clockInNotes || "—")}
@@ -2205,6 +2431,7 @@ async function createPayrollExportBatch() {
   const filters = readTimesheetFilters();
   setError(timesheetErrorEl, "");
   setInlineFeedback(timesheetActionMessageEl, "Creating payroll export...", "info");
+  setInlineFeedback(payrollExportActionMessageEl, "", "info");
 
   try {
     const data = await apiFetch("/api/admin/payroll-exports", {
@@ -2222,6 +2449,7 @@ async function createPayrollExportBatch() {
       loadPayrollExportBatches(),
     ]);
     setInlineFeedback(timesheetActionMessageEl, `Payroll export ${batch.id.slice(0, 8)} created.`, "success");
+    await loadPayrollExportBatchDetail(batch.id);
     await downloadPayrollExportBatch(batch.id, batch.fileName);
   } catch (error) {
     setError(timesheetErrorEl, error.message);
@@ -2267,10 +2495,18 @@ exportTimesheetsCsvBtnEl.addEventListener("click", () => {
 });
 
 payrollExportsListEl.addEventListener("click", (event) => {
-  const button = event.target.closest("button[data-action='download-payroll-batch']");
-  if (!button) return;
+  const viewButton = event.target.closest("button[data-action='view-payroll-batch']");
+  if (viewButton) {
+    loadPayrollExportBatchDetail(viewButton.dataset.batchid).catch((error) => {
+      setError(timesheetErrorEl, error.message);
+    });
+    return;
+  }
 
-  downloadPayrollExportBatch(button.dataset.batchid, button.dataset.filename).catch((error) => {
+  const downloadButton = event.target.closest("button[data-action='download-payroll-batch']");
+  if (!downloadButton) return;
+
+  downloadPayrollExportBatch(downloadButton.dataset.batchid, downloadButton.dataset.filename).catch((error) => {
     setError(timesheetErrorEl, error.message);
     setInlineFeedback(timesheetActionMessageEl, error.message, "error");
   });
@@ -2289,9 +2525,50 @@ timesheetDetailContentEl.addEventListener("submit", (event) => {
   submitTimesheetResolution(form);
 });
 
+timesheetDetailContentEl.addEventListener("click", (event) => {
+  const relatedBatchButton = event.target.closest("button[data-action='view-related-payroll-batch']");
+  if (!relatedBatchButton) return;
+
+  loadPayrollExportBatchDetail(relatedBatchButton.dataset.batchid).catch((error) => {
+    setError(timesheetErrorEl, error.message);
+  });
+});
+
+payrollExportDetailContentEl.addEventListener("submit", (event) => {
+  const form = event.target.closest("form#payrollExportReopenForm");
+  if (!form) return;
+  event.preventDefault();
+  submitPayrollExportReopen(form);
+});
+
+payrollExportDetailContentEl.addEventListener("click", (event) => {
+  const relatedBatchButton = event.target.closest("button[data-action='view-related-payroll-batch']");
+  if (relatedBatchButton) {
+    loadPayrollExportBatchDetail(relatedBatchButton.dataset.batchid).catch((error) => {
+      setError(timesheetErrorEl, error.message);
+    });
+    return;
+  }
+
+  const shiftButton = event.target.closest("button[data-action='view-exported-shift']");
+  if (shiftButton) {
+    loadTimesheetDetail(shiftButton.dataset.shiftid);
+    return;
+  }
+
+  const reissueButton = event.target.closest("button[data-action='reissue-payroll-batch']");
+  if (reissueButton) {
+    createReplacementPayrollExport(reissueButton.dataset.batchid);
+  }
+});
+
 closeTimesheetDetailBtnEl.addEventListener("click", () => {
   setInlineFeedback(timesheetActionMessageEl, "", "info");
   timesheetDetailPanelEl.classList.add("hidden");
+});
+
+closePayrollExportDetailBtnEl.addEventListener("click", () => {
+  renderPayrollExportDetail(null);
 });
 
 // ─── End Admin Timesheets ─────────────────────────────────────────────────────

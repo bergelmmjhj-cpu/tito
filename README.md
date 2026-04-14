@@ -302,7 +302,10 @@ Migration logic lives in:
 |--------|------|------|-------------|
 | `GET` | `/api/admin/payroll-exports` | query `limit?` | List recent immutable payroll export batches |
 | `POST` | `/api/admin/payroll-exports` | `{ "filters": { ...timesheetFilters } }` | Create a payroll export batch from the current approved, closed, reviewed shifts in view |
+| `GET` | `/api/admin/payroll-exports/:batchId` | - | Get full payroll batch detail including stored row snapshot and replacement links |
 | `GET` | `/api/admin/payroll-exports/:batchId/csv` | - | Download the stored CSV snapshot for a payroll export batch |
+| `POST` | `/api/admin/payroll-exports/:batchId/reopen` | `{ "note": "string" }` | Reopen an active payroll export batch and return its shifts to payroll-approved state |
+| `POST` | `/api/admin/payroll-exports/:batchId/reissue` | - | Create a replacement payroll export batch for a reopened batch and link the replacement history |
 
 ### Legacy compatibility routes
 
@@ -352,7 +355,8 @@ Existing v1 routes are still available:
 - Review exceptions from the `Timesheets` screen using business-date filters.
 - Mark a closed, reviewed shift as `Approved for payroll` when it is ready to leave operations review.
 - Create a payroll export batch from the approved shifts currently in view; this stores the exact exported CSV snapshot and marks those shifts as `Exported`.
-- Revert a shift to `Pending` if payroll needs it reopened; the audit trail records each transition.
+- Reopen a payroll export batch when payroll needs corrections; the batch retains its stored CSV snapshot and shifts return to `Approved` for correction.
+- Reissue a reopened batch after corrections to create a linked replacement export with explicit predecessor/successor history.
 
 ## CRM and geofencing readiness
 

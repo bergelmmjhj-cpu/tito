@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseTimesheetResolutionPayload } from "./adminTimesheetService.js";
+import { parsePayrollExportBatchActionPayload, parseTimesheetResolutionPayload } from "./adminTimesheetService.js";
 
 test("parseTimesheetResolutionPayload requires at least one actionable change", () => {
   assert.throws(
@@ -67,4 +67,16 @@ test("parseTimesheetResolutionPayload rejects manual exported transitions", () =
       }),
     /payrollStatus must be one of: pending, approved/
   );
+});
+
+test("parsePayrollExportBatchActionPayload requires a reopen note", () => {
+  assert.throws(
+    () => parsePayrollExportBatchActionPayload({}),
+    /note is required/
+  );
+});
+
+test("parsePayrollExportBatchActionPayload trims and returns the note", () => {
+  const parsed = parsePayrollExportBatchActionPayload({ note: "  Payroll requested corrections.  " });
+  assert.equal(parsed.note, "Payroll requested corrections.");
 });

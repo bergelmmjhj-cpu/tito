@@ -89,6 +89,7 @@ const CREATE_TABLES_SQL = `
     payroll_approved_at TIMESTAMP,
     payroll_exported_by TEXT REFERENCES users(id) ON DELETE SET NULL,
     payroll_exported_at TIMESTAMP,
+    payroll_export_batch_id TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
@@ -96,6 +97,7 @@ const CREATE_TABLES_SQL = `
   CREATE INDEX IF NOT EXISTS idx_shifts_user_id ON shifts(user_id);
   CREATE INDEX IF NOT EXISTS idx_shifts_clock_in_at ON shifts(clock_in_at);
   CREATE INDEX IF NOT EXISTS idx_shifts_payroll_status ON shifts(payroll_status);
+  CREATE INDEX IF NOT EXISTS idx_shifts_payroll_export_batch_id ON shifts(payroll_export_batch_id);
   CREATE UNIQUE INDEX IF NOT EXISTS uq_shifts_one_open_per_user ON shifts(user_id) WHERE clock_out_at IS NULL;
 
   -- Breaks table
@@ -130,7 +132,13 @@ const CREATE_TABLES_SQL = `
   -- Immutable payroll export snapshots
   CREATE TABLE IF NOT EXISTS payroll_export_batches (
     id TEXT PRIMARY KEY,
+    status VARCHAR(50) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'reopened', 'replaced')),
     created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    reopened_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    reopened_at TIMESTAMP,
+    reopened_note TEXT,
+    supersedes_batch_id TEXT REFERENCES payroll_export_batches(id) ON DELETE SET NULL,
+    replaced_by_batch_id TEXT REFERENCES payroll_export_batches(id) ON DELETE SET NULL,
     shift_count INTEGER NOT NULL,
     total_payable_hours NUMERIC(10, 2) NOT NULL DEFAULT 0,
     filters JSONB NOT NULL DEFAULT '{}',
@@ -143,6 +151,9 @@ const CREATE_TABLES_SQL = `
 
   CREATE INDEX IF NOT EXISTS idx_payroll_export_batches_created_at ON payroll_export_batches(created_at);
   CREATE INDEX IF NOT EXISTS idx_payroll_export_batches_created_by ON payroll_export_batches(created_by);
+  CREATE INDEX IF NOT EXISTS idx_payroll_export_batches_status ON payroll_export_batches(status);
+  CREATE INDEX IF NOT EXISTS idx_payroll_export_batches_supersedes ON payroll_export_batches(supersedes_batch_id);
+  CREATE INDEX IF NOT EXISTS idx_payroll_export_batches_replaced_by ON payroll_export_batches(replaced_by_batch_id);
 
   -- Sessions table
   CREATE TABLE IF NOT EXISTS sessions (

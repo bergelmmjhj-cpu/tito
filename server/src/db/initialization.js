@@ -104,10 +104,18 @@ async function applySchemaAlterations() {
     `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS payroll_approved_at TIMESTAMP`,
     `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS payroll_exported_by TEXT REFERENCES users(id) ON DELETE SET NULL`,
     `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS payroll_exported_at TIMESTAMP`,
+    `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS payroll_export_batch_id TEXT`,
     `CREATE INDEX IF NOT EXISTS idx_shifts_payroll_status ON shifts(payroll_status)`,
+    `CREATE INDEX IF NOT EXISTS idx_shifts_payroll_export_batch_id ON shifts(payroll_export_batch_id)`,
     `CREATE TABLE IF NOT EXISTS payroll_export_batches (
       id TEXT PRIMARY KEY,
+      status VARCHAR(50) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'reopened', 'replaced')),
       created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+      reopened_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+      reopened_at TIMESTAMP,
+      reopened_note TEXT,
+      supersedes_batch_id TEXT REFERENCES payroll_export_batches(id) ON DELETE SET NULL,
+      replaced_by_batch_id TEXT REFERENCES payroll_export_batches(id) ON DELETE SET NULL,
       shift_count INTEGER NOT NULL,
       total_payable_hours NUMERIC(10, 2) NOT NULL DEFAULT 0,
       filters JSONB NOT NULL DEFAULT '{}',
@@ -117,8 +125,17 @@ async function applySchemaAlterations() {
       file_name TEXT NOT NULL,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
+    `ALTER TABLE payroll_export_batches ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'active'`,
+    `ALTER TABLE payroll_export_batches ADD COLUMN IF NOT EXISTS reopened_by TEXT REFERENCES users(id) ON DELETE SET NULL`,
+    `ALTER TABLE payroll_export_batches ADD COLUMN IF NOT EXISTS reopened_at TIMESTAMP`,
+    `ALTER TABLE payroll_export_batches ADD COLUMN IF NOT EXISTS reopened_note TEXT`,
+    `ALTER TABLE payroll_export_batches ADD COLUMN IF NOT EXISTS supersedes_batch_id TEXT REFERENCES payroll_export_batches(id) ON DELETE SET NULL`,
+    `ALTER TABLE payroll_export_batches ADD COLUMN IF NOT EXISTS replaced_by_batch_id TEXT REFERENCES payroll_export_batches(id) ON DELETE SET NULL`,
     `CREATE INDEX IF NOT EXISTS idx_payroll_export_batches_created_at ON payroll_export_batches(created_at)`,
     `CREATE INDEX IF NOT EXISTS idx_payroll_export_batches_created_by ON payroll_export_batches(created_by)`,
+    `CREATE INDEX IF NOT EXISTS idx_payroll_export_batches_status ON payroll_export_batches(status)`,
+    `CREATE INDEX IF NOT EXISTS idx_payroll_export_batches_supersedes ON payroll_export_batches(supersedes_batch_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_payroll_export_batches_replaced_by ON payroll_export_batches(replaced_by_batch_id)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS uq_shifts_one_open_per_user ON shifts(user_id) WHERE clock_out_at IS NULL`,
     `ALTER TABLE time_logs DROP CONSTRAINT IF EXISTS time_logs_action_type_check`,
     `ALTER TABLE time_logs ADD CONSTRAINT time_logs_action_type_check CHECK (action_type IN ('clock_in', 'break_start', 'break_end', 'clock_out', 'admin_review', 'admin_close_shift', 'admin_end_break', 'admin_payable_adjustment', 'admin_payroll_approved', 'admin_payroll_exported', 'admin_payroll_reopened'))`,
@@ -233,8 +250,8 @@ async function migrateFromJsonIfExists() {
                 id, user_id, clock_in_at, clock_out_at, business_date, business_time_zone,
                 actual_hours, payable_hours, review_status, review_note, reviewed_by, reviewed_at,
                 payroll_status, payroll_approved_by, payroll_approved_at, payroll_exported_by, payroll_exported_at,
-                created_at, updated_at
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+                payroll_export_batch_id, created_at, updated_at
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
               ON CONFLICT (id) DO NOTHING`,
               [
                 shift.id,
@@ -254,6 +271,7 @@ async function migrateFromJsonIfExists() {
                 shift.payrollApprovedAt || null,
                 shift.payrollExportedBy || null,
                 shift.payrollExportedAt || null,
+                shift.payrollExportBatchId || null,
                 shift.createdAt || new Date().toISOString(),
                 shift.updatedAt || new Date().toISOString(),
               ]
@@ -310,12 +328,20 @@ async function migrateFromJsonIfExists() {
           for (const batch of data.payrollExportBatches) {
             await client.query(
               `INSERT INTO payroll_export_batches (
-                id, created_by, shift_count, total_payable_hours, filters, shift_ids, rows_snapshot, csv_content, file_name, created_at
-              ) VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8, $9, $10)
+                id, status, created_by, reopened_by, reopened_at, reopened_note,
+                supersedes_batch_id, replaced_by_batch_id,
+                shift_count, total_payable_hours, filters, shift_ids, rows_snapshot, csv_content, file_name, created_at
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14, $15, $16)
               ON CONFLICT (id) DO NOTHING`,
               [
                 batch.id,
+                batch.status || "active",
                 batch.createdBy || null,
+                batch.reopenedBy || null,
+                batch.reopenedAt || null,
+                batch.reopenedNote || null,
+                batch.supersedesBatchId || null,
+                batch.replacedByBatchId || null,
                 typeof batch.shiftCount === "number" ? batch.shiftCount : Array.isArray(batch.shiftIds) ? batch.shiftIds.length : 0,
                 typeof batch.totalPayableHours === "number" ? Number(batch.totalPayableHours.toFixed(2)) : 0,
                 JSON.stringify(batch.filters && typeof batch.filters === "object" ? batch.filters : {}),
@@ -409,7 +435,7 @@ export async function writeDatabaseToJson(db) {
 
 function createInitialDatabase() {
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     users: [],
     workplaces: [],
     shifts: [],

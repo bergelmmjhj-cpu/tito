@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { createPasswordHash } from "../utils/password.js";
 import { buildShiftHourSummary } from "../services/payableHoursService.js";
 
-export const CURRENT_SCHEMA_VERSION = 7;
+export const CURRENT_SCHEMA_VERSION = 8;
 
 const DEFAULT_BOOTSTRAP_ADMIN = {
   firstName: "System",
@@ -275,6 +275,10 @@ export function migrateDatabase(db) {
         typeof shift.payrollExportedAt === "string" && shift.payrollExportedAt.trim()
           ? shift.payrollExportedAt.trim()
           : null,
+      payrollExportBatchId:
+        typeof shift.payrollExportBatchId === "string" && shift.payrollExportBatchId.trim()
+          ? shift.payrollExportBatchId.trim()
+          : null,
       actualHours:
         typeof shift.actualHours === "number" && Number.isFinite(shift.actualHours)
           ? shift.actualHours
@@ -345,12 +349,30 @@ export function migrateDatabase(db) {
 
   safe.payrollExportBatches = safe.payrollExportBatches.map((batch) => ({
     id: typeof batch?.id === "string" && batch.id.trim() ? batch.id.trim() : crypto.randomUUID(),
+    status:
+      batch?.status === "reopened" || batch?.status === "replaced"
+        ? batch.status
+        : "active",
     createdBy:
       typeof batch?.createdBy === "string" && batch.createdBy.trim() ? batch.createdBy.trim() : null,
     createdAt:
       typeof batch?.createdAt === "string" && batch.createdAt.trim()
         ? batch.createdAt.trim()
         : new Date().toISOString(),
+    reopenedBy:
+      typeof batch?.reopenedBy === "string" && batch.reopenedBy.trim() ? batch.reopenedBy.trim() : null,
+    reopenedAt:
+      typeof batch?.reopenedAt === "string" && batch.reopenedAt.trim() ? batch.reopenedAt.trim() : null,
+    reopenedNote:
+      typeof batch?.reopenedNote === "string" && batch.reopenedNote.trim() ? batch.reopenedNote.trim() : null,
+    supersedesBatchId:
+      typeof batch?.supersedesBatchId === "string" && batch.supersedesBatchId.trim()
+        ? batch.supersedesBatchId.trim()
+        : null,
+    replacedByBatchId:
+      typeof batch?.replacedByBatchId === "string" && batch.replacedByBatchId.trim()
+        ? batch.replacedByBatchId.trim()
+        : null,
     shiftCount:
       typeof batch?.shiftCount === "number" && Number.isFinite(batch.shiftCount)
         ? batch.shiftCount

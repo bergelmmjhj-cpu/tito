@@ -327,6 +327,15 @@
           <div id="payrollExportsList" class="payroll-exports-list">
             <p class="muted">No payroll export batches yet.</p>
           </div>
+
+          <div id="payrollExportDetailPanel" class="detail-panel hidden">
+            <div class="topbar">
+              <h3>Payroll Export Detail</h3>
+              <button id="closePayrollExportDetailBtn" type="button" class="ghost">✕ Close</button>
+            </div>
+            <p id="payrollExportActionMessage" class="action-feedback hidden"></p>
+            <div id="payrollExportDetailContent" class="detail-content"></div>
+          </div>
         </section>
         <p id="timesheetError" class="error hidden"></p>
         <div class="table-wrap">

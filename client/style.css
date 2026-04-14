@@ -554,10 +554,28 @@ th {
   font-size: 0.84rem;
 }
 
+.payroll-export-state {
+  margin-top: 6px;
+  font-size: 0.84rem;
+}
+
 .payroll-export-actions {
   display: flex;
   flex-shrink: 0;
   align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.status-badge-batch-active { color: #34d399; }
+.status-badge-batch-reopened { color: #fdba74; }
+.status-badge-batch-replaced { color: #93c5fd; }
+
+.detail-link-button {
+  width: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 @media (max-width: 720px) {

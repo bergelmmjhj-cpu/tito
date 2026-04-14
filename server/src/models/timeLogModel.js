@@ -99,6 +99,7 @@ function normalizeDbShift(dbShift, breaks = []) {
     payrollApprovedAt: normalizeTimestamp(dbShift.payroll_approved_at),
     payrollExportedBy: dbShift.payroll_exported_by || null,
     payrollExportedAt: normalizeTimestamp(dbShift.payroll_exported_at),
+    payrollExportBatchId: dbShift.payroll_export_batch_id || null,
     breaks: normalizedBreaks,
     createdAt: normalizeTimestamp(dbShift.created_at),
     updatedAt: normalizeTimestamp(dbShift.updated_at),
@@ -430,9 +431,14 @@ function buildPayrollStateTransition(currentShift, actorUserId, eventTimestamp, 
       payrollApprovedAt: currentShift.payrollApprovedAt || null,
       payrollExportedBy: currentShift.payrollExportedBy || null,
       payrollExportedAt: currentShift.payrollExportedAt || null,
+      payrollExportBatchId: currentShift.payrollExportBatchId || null,
       changed: false,
       previousPayrollStatus: currentPayrollStatus,
     };
+  }
+
+  if (currentPayrollStatus === "exported") {
+    throw new HttpError(409, "Exported shifts must be reopened from their payroll batch before payroll status can change");
   }
 
   if (!finalClockOutAt) {
@@ -454,6 +460,7 @@ function buildPayrollStateTransition(currentShift, actorUserId, eventTimestamp, 
       payrollApprovedAt: null,
       payrollExportedBy: null,
       payrollExportedAt: null,
+      payrollExportBatchId: null,
       changed: true,
       previousPayrollStatus: currentPayrollStatus,
     };
@@ -466,6 +473,7 @@ function buildPayrollStateTransition(currentShift, actorUserId, eventTimestamp, 
       payrollApprovedAt: eventTimestamp,
       payrollExportedBy: null,
       payrollExportedAt: null,
+      payrollExportBatchId: null,
       changed: true,
       previousPayrollStatus: currentPayrollStatus,
     };
@@ -477,6 +485,7 @@ function buildPayrollStateTransition(currentShift, actorUserId, eventTimestamp, 
     payrollApprovedAt: currentShift.payrollApprovedAt || eventTimestamp,
     payrollExportedBy: actorUserId,
     payrollExportedAt: eventTimestamp,
+    payrollExportBatchId: currentShift.payrollExportBatchId || null,
     changed: true,
     previousPayrollStatus: currentPayrollStatus,
   };
@@ -554,6 +563,7 @@ export async function applyAdminShiftResolution(shiftId, actorUserId, resolution
     shift.payrollApprovedAt = payrollState.payrollApprovedAt;
     shift.payrollExportedBy = payrollState.payrollExportedBy;
     shift.payrollExportedAt = payrollState.payrollExportedAt;
+    shift.payrollExportBatchId = payrollState.payrollExportBatchId;
     shift.updatedAt = eventTimestamp;
 
     if (!Array.isArray(db.timeLogs)) db.timeLogs = [];
@@ -671,8 +681,9 @@ export async function applyAdminShiftResolution(shiftId, actorUserId, resolution
             payroll_approved_at = $10,
             payroll_exported_by = $11,
             payroll_exported_at = $12,
-            updated_at = $13
-        WHERE id = $14`,
+            payroll_export_batch_id = $13,
+            updated_at = $14
+          WHERE id = $15`,
         [
           nextShift.clockOutAt,
           summary.actualHours,
@@ -686,6 +697,7 @@ export async function applyAdminShiftResolution(shiftId, actorUserId, resolution
           payrollState.payrollApprovedAt,
           payrollState.payrollExportedBy,
           payrollState.payrollExportedAt,
+          payrollState.payrollExportBatchId,
           eventTimestamp,
           shiftId,
         ]
@@ -747,6 +759,7 @@ export async function saveClockIn(userId, notes = null, location = null, geofenc
       payrollApprovedAt: null,
       payrollExportedBy: null,
       payrollExportedAt: null,
+      payrollExportBatchId: null,
       breaks: [],
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -828,6 +841,7 @@ export async function saveClockIn(userId, notes = null, location = null, geofenc
         payrollApprovedAt: null,
         payrollExportedBy: null,
         payrollExportedAt: null,
+        payrollExportBatchId: null,
         breaks: [],
         createdAt: timestamp,
         updatedAt: timestamp,

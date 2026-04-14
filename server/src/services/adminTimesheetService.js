@@ -5,6 +5,7 @@ import {
   createPayrollExportBatch,
   getPayrollExportBatchById,
   listPayrollExportBatches,
+  reopenPayrollExportBatch,
 } from "../models/payrollExportBatchModel.js";
 import {
   applyAdminShiftResolution,
@@ -24,6 +25,7 @@ const REVIEW_STATUSES = new Set(["reviewed", "follow_up_required"]);
 const PAYROLL_STATUSES = new Set(["pending", "approved", "exported"]);
 const MANUAL_PAYROLL_STATUSES = new Set(["pending", "approved"]);
 const ADMIN_REVIEW_NOTE_MAX_LENGTH = 1000;
+const PAYROLL_BATCH_NOTE_MAX_LENGTH = 1000;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -203,6 +205,7 @@ function buildTimesheetRow(shift, user, shiftLogs, workplaceIndex, userIndex = {
     payrollApprovedByUserId: shift?.payrollApprovedBy || null,
     payrollApprovedByName,
     payrollApprovedAt: shift?.payrollApprovedAt || null,
+    payrollExportBatchId: shift?.payrollExportBatchId || null,
     payrollExportedByUserId: shift?.payrollExportedBy || null,
     payrollExportedByName,
     payrollExportedAt: shift?.payrollExportedAt || null,
@@ -263,6 +266,14 @@ function normalizeReviewNote(value) {
   }
 
   return value.trim().slice(0, ADMIN_REVIEW_NOTE_MAX_LENGTH);
+}
+
+function normalizePayrollBatchNote(value) {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new HttpError(400, "note is required");
+  }
+
+  return value.trim().slice(0, PAYROLL_BATCH_NOTE_MAX_LENGTH);
 }
 
 function parseOptionalIsoDateTime(value, label) {
@@ -348,6 +359,12 @@ async function getFilteredTimesheetRows(filters) {
     if (filters.dateTo && (!row.date || row.date > filters.dateTo)) return false;
     return true;
   });
+}
+
+async function getTimesheetRowsByShiftIds(shiftIds) {
+  const rows = await getFilteredTimesheetRows({});
+  const rowIndex = new Map(rows.map((row) => [row.shiftId, row]));
+  return shiftIds.map((shiftId) => rowIndex.get(shiftId) || null);
 }
 
 // ---------------------------------------------------------------------------
@@ -516,12 +533,44 @@ function enrichPayrollExportBatch(batch, userIndex) {
   return {
     ...batch,
     createdByName: batch.createdBy ? userIndex[batch.createdBy]?.name || null : null,
+    reopenedByName: batch.reopenedBy ? userIndex[batch.reopenedBy]?.name || null : null,
+  };
+}
+
+function summarizeRelatedPayrollBatch(batch, userIndex) {
+  if (!batch) return null;
+  return {
+    id: batch.id,
+    status: batch.status,
+    createdAt: batch.createdAt,
+    createdByName: batch.createdBy ? userIndex[batch.createdBy]?.name || null : null,
+    fileName: batch.fileName,
   };
 }
 
 export async function listAdminPayrollExportBatches(limit = 10) {
   const [batches, userIndex] = await Promise.all([listPayrollExportBatches(limit), buildUserIndex()]);
   return batches.map((batch) => enrichPayrollExportBatch(batch, userIndex));
+}
+
+export async function getAdminPayrollExportBatchDetail(batchId) {
+  if (!batchId || typeof batchId !== "string") {
+    throw new HttpError(400, "batchId is required");
+  }
+
+  const [batch, userIndex] = await Promise.all([getPayrollExportBatchById(batchId), buildUserIndex()]);
+  if (!batch) throw new HttpError(404, "Payroll export batch not found");
+
+  const [supersedesBatch, replacedByBatch] = await Promise.all([
+    batch.supersedesBatchId ? getPayrollExportBatchById(batch.supersedesBatchId) : Promise.resolve(null),
+    batch.replacedByBatchId ? getPayrollExportBatchById(batch.replacedByBatchId) : Promise.resolve(null),
+  ]);
+
+  return {
+    ...enrichPayrollExportBatch(batch, userIndex),
+    supersedesBatch: summarizeRelatedPayrollBatch(supersedesBatch, userIndex),
+    replacedByBatch: summarizeRelatedPayrollBatch(replacedByBatch, userIndex),
+  };
 }
 
 export async function getAdminPayrollExportBatchCsv(batchId) {
@@ -532,6 +581,12 @@ export async function getAdminPayrollExportBatchCsv(batchId) {
   const batch = await getPayrollExportBatchById(batchId);
   if (!batch) throw new HttpError(404, "Payroll export batch not found");
   return batch;
+}
+
+export function parsePayrollExportBatchActionPayload(payload = {}) {
+  return {
+    note: normalizePayrollBatchNote(payload.note),
+  };
 }
 
 export async function createAdminPayrollExportBatch(filters, actor) {
@@ -558,6 +613,45 @@ export async function createAdminPayrollExportBatch(filters, actor) {
 
   const userIndex = await buildUserIndex();
   return enrichPayrollExportBatch(batch, userIndex);
+}
+
+export async function reopenAdminPayrollExportBatch(batchId, payload, actor) {
+  if (!actor?.id) throw new HttpError(401, "Admin user is required");
+
+  const parsed = parsePayrollExportBatchActionPayload(payload || {});
+  await reopenPayrollExportBatch(batchId, actor.id, parsed.note);
+  return getAdminPayrollExportBatchDetail(batchId);
+}
+
+export async function reissueAdminPayrollExportBatch(batchId, actor) {
+  if (!actor?.id) throw new HttpError(401, "Admin user is required");
+
+  const currentBatch = await getPayrollExportBatchById(batchId);
+  if (!currentBatch) throw new HttpError(404, "Payroll export batch not found");
+  if (currentBatch.status !== "reopened") {
+    throw new HttpError(409, "Payroll export batch must be reopened before it can be reissued");
+  }
+
+  const currentRows = await getTimesheetRowsByShiftIds(currentBatch.shiftIds || []);
+  if (currentRows.some((row) => !row)) {
+    throw new HttpError(404, "One or more shifts from the original payroll export batch could not be found");
+  }
+
+  const exportRows = currentRows.filter((row) => row && isEligibleForPayrollExport(row));
+  if (exportRows.length !== currentBatch.shiftIds.length) {
+    throw new HttpError(409, "All shifts in the reopened payroll export batch must be approved again before reissue");
+  }
+
+  const csvContent = buildCsvFromRows(exportRows);
+  const replacementBatch = await createPayrollExportBatch({
+    actorUserId: actor.id,
+    filters: currentBatch.filters || {},
+    rows: exportRows,
+    csvContent,
+    supersedesBatchId: currentBatch.id,
+  });
+
+  return getAdminPayrollExportBatchDetail(replacementBatch.id);
 }
 
 /**
