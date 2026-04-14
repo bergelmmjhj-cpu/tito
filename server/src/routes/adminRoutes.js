@@ -36,6 +36,7 @@ import {
   setAdminUserStatusController,
 } from "../controllers/adminUserController.js";
 import { adminLoginRateLimit } from "../middleware/rateLimitMiddleware.js";
+import { dashboardController } from "../controllers/adminDashboardController.js";
 
 export function createAdminRoutes() {
   const router = Router();
@@ -51,6 +52,8 @@ export function createAdminRoutes() {
   router.use(requireRole("admin"));
 
   router.get("/me", adminMeController);
+
+  router.get("/dashboard", dashboardController);
 
   router.get("/workers", listWorkersController);
   router.patch("/workers/:workerUserId/workplace", assignWorkerWorkplaceController);
