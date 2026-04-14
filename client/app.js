@@ -1653,6 +1653,7 @@ historyBodyEl.addEventListener("click", (event) => {
 
 const tsDateFromEl = document.getElementById("tsDateFrom");
 const tsDateToEl = document.getElementById("tsDateTo");
+const tsPayPeriodFilterEl = document.getElementById("tsPayPeriodFilter");
 const tsSearchEl = document.getElementById("tsSearch");
 const tsWorkplaceFilterEl = document.getElementById("tsWorkplaceFilter");
 const tsStatusFilterEl = document.getElementById("tsStatusFilter");
@@ -1660,6 +1661,9 @@ const tsPayrollFilterEl = document.getElementById("tsPayrollFilter");
 const applyTimesheetFiltersBtnEl = document.getElementById("applyTimesheetFiltersBtn");
 const clearTimesheetFiltersBtnEl = document.getElementById("clearTimesheetFiltersBtn");
 const createPayrollExportBtnEl = document.getElementById("createPayrollExportBtn");
+const createPayPeriodFormEl = document.getElementById("createPayPeriodForm");
+const payPeriodActionMessageEl = document.getElementById("payPeriodActionMessage");
+const payPeriodsListEl = document.getElementById("payPeriodsList");
 const timesheetSummaryCardsEl = document.getElementById("timesheetSummaryCards");
 const payrollExportsListEl = document.getElementById("payrollExportsList");
 const payrollExportDetailPanelEl = document.getElementById("payrollExportDetailPanel");
@@ -1684,6 +1688,7 @@ function buildTimesheetFilterQueryString(filters) {
   const params = new URLSearchParams();
   if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
   if (filters.dateTo) params.set("dateTo", filters.dateTo);
+  if (filters.payPeriodId) params.set("payPeriodId", filters.payPeriodId);
   if (filters.search) params.set("search", filters.search);
   if (filters.workplaceId) params.set("workplaceId", filters.workplaceId);
   if (filters.status) params.set("status", filters.status);
@@ -1702,6 +1707,7 @@ function readTimesheetFilters() {
   return {
     dateFrom: tsDateFromEl.value || "",
     dateTo: tsDateToEl.value || "",
+    payPeriodId: tsPayPeriodFilterEl.value || "",
     search: tsSearchEl.value.trim(),
     workplaceId: tsWorkplaceFilterEl.value || "",
     status: tsStatusFilterEl.value || "",
@@ -1712,6 +1718,7 @@ function readTimesheetFilters() {
 function clearTimesheetFilters() {
   tsDateFromEl.value = "";
   tsDateToEl.value = "";
+  tsPayPeriodFilterEl.value = "";
   tsSearchEl.value = "";
   tsWorkplaceFilterEl.value = "";
   tsStatusFilterEl.value = "";
@@ -1819,6 +1826,73 @@ function renderTimesheetSummary(summary) {
     .join("");
 }
 
+function toPayPeriodStatusLabel(status) {
+  if (status === "locked") {
+    return `<span class="status-badge-period-locked">Locked</span>`;
+  }
+
+  return `<span class="status-badge-period-open">Open</span>`;
+}
+
+function formatPayPeriodLabel(period) {
+  if (!period) return "—";
+  return period.label || `${period.startDate || "..."} to ${period.endDate || "..."}`;
+}
+
+function populatePayPeriodFilter(periods, selectedId = "") {
+  const dynamicOptions = tsPayPeriodFilterEl.querySelectorAll("option[data-dynamic]");
+  dynamicOptions.forEach((option) => option.remove());
+
+  (periods || []).forEach((period) => {
+    const option = document.createElement("option");
+    option.value = period.id;
+    option.textContent = `${formatPayPeriodLabel(period)}${period.status === "locked" ? " • Locked" : ""}`;
+    option.dataset.dynamic = "1";
+    tsPayPeriodFilterEl.appendChild(option);
+  });
+
+  tsPayPeriodFilterEl.value = selectedId && (periods || []).some((period) => period.id === selectedId)
+    ? selectedId
+    : "";
+}
+
+function renderPayPeriods(periods) {
+  if (!Array.isArray(periods) || periods.length === 0) {
+    payPeriodsListEl.innerHTML = '<p class="muted">No pay periods yet.</p>';
+    populatePayPeriodFilter([], "");
+    return;
+  }
+
+  const selectedPayPeriodId = tsPayPeriodFilterEl.value || "";
+  populatePayPeriodFilter(periods, selectedPayPeriodId);
+
+  payPeriodsListEl.innerHTML = periods
+    .map((period) => {
+      const counts = period.counts || {};
+      const lifecycleMeta = period.status === "locked"
+        ? `Locked ${formatDateTime(period.lockedAt)}${period.lockedByName ? ` by ${escapeHtml(period.lockedByName)}` : ""}`
+        : period.reopenedAt
+          ? `Reopened ${formatDateTime(period.reopenedAt)}${period.reopenedByName ? ` by ${escapeHtml(period.reopenedByName)}` : ""}`
+          : `Created ${formatDateTime(period.createdAt)}${period.createdByName ? ` by ${escapeHtml(period.createdByName)}` : ""}`;
+
+      return `
+        <article class="pay-period-item">
+          <div class="pay-period-copy">
+            <div class="pay-period-title">${escapeHtml(formatPayPeriodLabel(period))}</div>
+            <div class="pay-period-meta">${escapeHtml(period.startDate || "—")} to ${escapeHtml(period.endDate || "—")} • ${toPayPeriodStatusLabel(period.status)} • ${counts.shiftCount || 0} shifts • ${counts.exportedCount || 0} exported • ${counts.readyCount || 0} ready</div>
+            <div class="pay-period-meta">${lifecycleMeta}</div>
+          </div>
+          <div class="pay-period-actions">
+            <button class="ghost tiny" type="button" data-action="use-pay-period" data-periodid="${period.id}">Use in Filters</button>
+            ${period.status === "locked"
+              ? `<button class="ghost tiny" type="button" data-action="reopen-pay-period" data-periodid="${period.id}">Reopen</button>`
+              : `<button class="ghost tiny" type="button" data-action="lock-pay-period" data-periodid="${period.id}">Lock</button>`}
+          </div>
+        </article>`;
+    })
+    .join("");
+}
+
 function toPayrollBatchStatusLabel(status) {
   if (status === "reopened") {
     return `<span class="status-badge-batch-reopened">Reopened</span>`;
@@ -1854,6 +1928,7 @@ function formatBatchFilterSummary(filters) {
   if (filters.dateFrom || filters.dateTo) {
     parts.push(`Dates ${filters.dateFrom || "..."} to ${filters.dateTo || "..."}`);
   }
+  if (filters.payPeriodId) parts.push("Pay period selected");
   if (filters.search) parts.push(`Search: ${filters.search}`);
   if (filters.workplaceId) parts.push(`Workplace filter applied`);
   if (filters.status) parts.push(`Status: ${filters.status}`);
@@ -1877,7 +1952,7 @@ function renderPayrollExportBatches(batches) {
         <article class="payroll-export-item">
           <div class="payroll-export-copy">
             <div class="payroll-export-title">Batch ${label}</div>
-            <div class="payroll-export-meta">${formatDateTime(batch.createdAt)} • ${shiftCount} shifts • ${formatHours(batch.totalPayableHours)} payable hours • ${createdBy}</div>
+            <div class="payroll-export-meta">${formatDateTime(batch.createdAt)} • ${shiftCount} shifts • ${formatHours(batch.totalPayableHours)} payable hours • ${createdBy}${batch.payPeriodLabel ? ` • ${escapeHtml(batch.payPeriodLabel)}` : ""}</div>
             <div class="payroll-export-file">${batch.fileName || "Stored CSV snapshot"}</div>
             <div class="payroll-export-state">${toPayrollBatchStatusLabel(batch.status)} • ${toPayrollBatchRelationText(batch)}</div>
           </div>
@@ -1900,6 +1975,7 @@ function renderPayrollExportDetail(batch) {
   }
 
   currentPayrollExportBatchId = batch.id || "";
+  const payPeriodLocked = batch.payPeriodStatus === "locked";
 
   const field = (label, value) => `
     <div class="detail-item">
@@ -1920,6 +1996,12 @@ function renderPayrollExportDetail(batch) {
       ${field("Created By", batch.createdByName || "—")}
       ${field("Shift Count", batch.shiftCount)}
       ${field("Payable Hours", formatHours(batch.totalPayableHours))}
+      ${field(
+        "Pay Period",
+        batch.payPeriodLabel
+          ? `${escapeHtml(batch.payPeriodLabel)} (${escapeHtml(batch.payPeriodStartDate || "—")} to ${escapeHtml(batch.payPeriodEndDate || "—")}) • ${toPayPeriodStatusLabel(batch.payPeriodStatus || "open")}`
+          : "—"
+      )}
       ${field("File Name", batch.fileName || "—")}
       ${field("Filters", formatBatchFilterSummary(batch.filters))}
       ${field("Reopened At", formatDateTime(batch.reopenedAt))}
@@ -1929,7 +2011,13 @@ function renderPayrollExportDetail(batch) {
       ${field("Replaced By", relatedBatchButton("Batch", batch.replacedByBatch))}
     </div>`;
 
-  const actionsHtml = batch.status === "active"
+  const actionsHtml = payPeriodLocked
+    ? `
+      <section class="resolution-panel">
+        <h3>Batch Actions</h3>
+        <p class="detail-note">${escapeHtml(batch.payPeriodLabel || "This pay period")} is locked. Reopen the pay period before changing this payroll export batch.</p>
+      </section>`
+    : batch.status === "active"
     ? `
       <section class="resolution-panel">
         <h3>Batch Actions</h3>
@@ -1995,6 +2083,76 @@ function renderPayrollExportDetail(batch) {
   payrollExportDetailPanelEl.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+async function loadPayPeriods(preferredPayPeriodId = tsPayPeriodFilterEl.value || "") {
+  try {
+    const data = await apiFetch("/api/admin/pay-periods?limit=12");
+    const periods = data?.periods || [];
+    renderPayPeriods(periods);
+    populatePayPeriodFilter(periods, preferredPayPeriodId);
+  } catch {
+    renderPayPeriods([]);
+  }
+}
+
+async function createPayPeriod(form) {
+  setError(timesheetErrorEl, "");
+  setInlineFeedback(payPeriodActionMessageEl, "Creating pay period...", "info");
+
+  const formData = new FormData(form);
+
+  try {
+    const data = await apiFetch("/api/admin/pay-periods", {
+      method: "POST",
+      body: JSON.stringify({
+        label: String(formData.get("label") || "").trim() || undefined,
+        startDate: String(formData.get("startDate") || "").trim() || undefined,
+        endDate: String(formData.get("endDate") || "").trim() || undefined,
+      }),
+    });
+
+    const period = data?.period;
+    form.reset();
+    await loadPayPeriods(period?.id || "");
+    if (period?.id) {
+      tsPayPeriodFilterEl.value = period.id;
+    }
+    setInlineFeedback(payPeriodActionMessageEl, `Pay period ${period?.label || "created"} created.`, "success");
+    await loadTimesheets(readTimesheetFilters(), 1);
+  } catch (error) {
+    setError(timesheetErrorEl, error.message);
+    setInlineFeedback(payPeriodActionMessageEl, error.message, "error");
+  }
+}
+
+async function updatePayPeriodStatus(periodId, action) {
+  if (!periodId) return;
+
+  const actionLabel = action === "reopen" ? "Reopening" : "Locking";
+  setError(timesheetErrorEl, "");
+  setInlineFeedback(payPeriodActionMessageEl, `${actionLabel} pay period...`, "info");
+
+  try {
+    const data = await apiFetch(`/api/admin/pay-periods/${encodeURIComponent(periodId)}/${action}`, {
+      method: "POST",
+    });
+
+    const period = data?.period;
+    await loadPayPeriods(period?.id || tsPayPeriodFilterEl.value || "");
+    await loadTimesheets(readTimesheetFilters(), timesheetsCurrentPage);
+    if (currentPayrollExportBatchId) {
+      await loadPayrollExportBatchDetail(currentPayrollExportBatchId);
+    }
+    setInlineFeedback(
+      payPeriodActionMessageEl,
+      `Pay period ${period?.label || periodId.slice(0, 8)} ${action === "reopen" ? "reopened" : "locked"}.`,
+      "success"
+    );
+  } catch (error) {
+    setError(timesheetErrorEl, error.message);
+    setInlineFeedback(payPeriodActionMessageEl, error.message, "error");
+  }
+}
+
 async function loadPayrollExportBatches() {
   try {
     const data = await apiFetch("/api/admin/payroll-exports?limit=6");
@@ -2040,7 +2198,11 @@ async function submitPayrollExportReopen(form) {
       }),
     });
 
-    await Promise.all([loadTimesheets(timesheetsLastFilters, timesheetsCurrentPage), loadPayrollExportBatches()]);
+    await Promise.all([
+      loadTimesheets(timesheetsLastFilters, timesheetsCurrentPage),
+      loadPayrollExportBatches(),
+      loadPayPeriods(tsPayPeriodFilterEl.value || ""),
+    ]);
     renderPayrollExportDetail(data?.batch || null);
     setInlineFeedback(payrollExportActionMessageEl, `Payroll export ${batchId.slice(0, 8)} reopened.`, "success");
   } catch (error) {
@@ -2065,7 +2227,11 @@ async function createReplacementPayrollExport(batchId) {
       throw new Error("Replacement payroll export batch was created without an id");
     }
 
-    await Promise.all([loadTimesheets(timesheetsLastFilters, timesheetsCurrentPage), loadPayrollExportBatches()]);
+    await Promise.all([
+      loadTimesheets(timesheetsLastFilters, timesheetsCurrentPage),
+      loadPayrollExportBatches(),
+      loadPayPeriods(batch.payPeriodId || tsPayPeriodFilterEl.value || ""),
+    ]);
     renderPayrollExportDetail(batch);
     setInlineFeedback(payrollExportActionMessageEl, `Replacement payroll export ${batch.id.slice(0, 8)} created.`, "success");
     await downloadPayrollExportBatch(batch.id, batch.fileName);
@@ -2168,12 +2334,14 @@ async function populateWorkplaceFilter() {
 async function initTimesheetsScreen() {
   setError(timesheetErrorEl, "");
   setInlineFeedback(timesheetActionMessageEl, "", "info");
+  setInlineFeedback(payPeriodActionMessageEl, "", "info");
   renderTimesheetSummary(null);
+  renderPayPeriods([]);
   renderPayrollExportBatches([]);
   renderPayrollExportDetail(null);
   clearTimesheetFilters();
   timesheetDetailPanelEl.classList.add("hidden");
-  await Promise.all([populateWorkplaceFilter(), loadPayrollExportBatches()]);
+  await Promise.all([populateWorkplaceFilter(), loadPayrollExportBatches(), loadPayPeriods()]);
   await loadTimesheets({}, 1);
 }
 
@@ -2197,6 +2365,7 @@ function renderTimesheetDetail(detail) {
     : "n/a";
 
   const reviewLabel = toReviewStateLabel(detail.reviewStatus, detail.reviewPending);
+  const payPeriodLocked = detail.payPeriodStatus === "locked";
   const activeBreak = Array.isArray(detail.breaks)
     ? [...detail.breaks].reverse().find((item) => item.startAt && !item.endAt) || null
     : null;
@@ -2213,6 +2382,12 @@ function renderTimesheetDetail(detail) {
       ${field("Email", detail.workerEmail)}
       ${field("Business Date", detail.date)}
       ${field("Business Time Zone", detail.businessTimeZone || "—")}
+      ${field(
+        "Pay Period",
+        detail.payPeriodLabel
+          ? `${escapeHtml(detail.payPeriodLabel)} (${escapeHtml(detail.payPeriodStartDate || "—")} to ${escapeHtml(detail.payPeriodEndDate || "—")}) • ${toPayPeriodStatusLabel(detail.payPeriodStatus || "open")}`
+          : "—"
+      )}
       ${field("Status", detail.status)}
       ${field("Clock In", formatDateTime(detail.clockInAt))}
       ${field("Clock Out", formatDateTime(detail.clockOutAt))}
@@ -2246,7 +2421,13 @@ function renderTimesheetDetail(detail) {
       ${field("Clock-Out Notes", detail.clockOutNotes || "—")}
     </div>`;
 
-  const resolutionHtml = `
+  const resolutionHtml = payPeriodLocked
+    ? `
+    <section class="resolution-panel">
+      <h3>Resolution Tools</h3>
+      <p class="detail-note">${escapeHtml(detail.payPeriodLabel || "This pay period")} is locked. Reopen the pay period before modifying shifts in it.</p>
+    </section>`
+    : `
     <section class="resolution-panel">
       <h3>Resolution Tools</h3>
       <p class="detail-note">Use these actions to close operational exceptions, leave a manager audit note, and control payroll readiness. Stored payroll exports are created from the main timesheet screen after shifts are approved.</p>
@@ -2420,7 +2601,10 @@ async function submitTimesheetResolution(form) {
 
     renderTimesheetDetail(data.timesheet);
     setInlineFeedback(timesheetActionMessageEl, "Resolution saved.", "success");
-    await loadTimesheets(timesheetsLastFilters, timesheetsCurrentPage);
+    await Promise.all([
+      loadTimesheets(timesheetsLastFilters, timesheetsCurrentPage),
+      loadPayPeriods(tsPayPeriodFilterEl.value || ""),
+    ]);
   } catch (error) {
     setError(timesheetErrorEl, error.message);
     setInlineFeedback(timesheetActionMessageEl, error.message, "error");
@@ -2447,6 +2631,7 @@ async function createPayrollExportBatch() {
     await Promise.all([
       loadTimesheets(filters, 1),
       loadPayrollExportBatches(),
+      loadPayPeriods(batch.payPeriodId || filters.payPeriodId || tsPayPeriodFilterEl.value || ""),
     ]);
     setInlineFeedback(timesheetActionMessageEl, `Payroll export ${batch.id.slice(0, 8)} created.`, "success");
     await loadPayrollExportBatchDetail(batch.id);
@@ -2476,11 +2661,37 @@ createPayrollExportBtnEl.addEventListener("click", () => {
   createPayrollExportBatch();
 });
 
+createPayPeriodFormEl.addEventListener("submit", (event) => {
+  event.preventDefault();
+  createPayPeriod(event.target);
+});
+
+payPeriodsListEl.addEventListener("click", (event) => {
+  const useButton = event.target.closest("button[data-action='use-pay-period']");
+  if (useButton) {
+    tsPayPeriodFilterEl.value = useButton.dataset.periodid || "";
+    loadTimesheets(readTimesheetFilters(), 1).catch((error) => setError(timesheetErrorEl, error.message));
+    return;
+  }
+
+  const lockButton = event.target.closest("button[data-action='lock-pay-period']");
+  if (lockButton) {
+    updatePayPeriodStatus(lockButton.dataset.periodid, "lock");
+    return;
+  }
+
+  const reopenButton = event.target.closest("button[data-action='reopen-pay-period']");
+  if (reopenButton) {
+    updatePayPeriodStatus(reopenButton.dataset.periodid, "reopen");
+  }
+});
+
 exportTimesheetsCsvBtnEl.addEventListener("click", () => {
   const filters = readTimesheetFilters();
   const params = new URLSearchParams();
   if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
   if (filters.dateTo) params.set("dateTo", filters.dateTo);
+  if (filters.payPeriodId) params.set("payPeriodId", filters.payPeriodId);
   if (filters.search) params.set("search", filters.search);
   if (filters.workplaceId) params.set("workplaceId", filters.workplaceId);
   if (filters.status) params.set("status", filters.status);

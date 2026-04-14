@@ -12,14 +12,19 @@ import {
   listWorkersController,
 } from "../controllers/adminWorkerController.js";
 import {
+  createPayrollPeriodController,
   createPayrollExportBatchController,
   downloadPayrollExportBatchCsvController,
   exportTimesheetsCsvController,
+  getPayrollPeriodDetailController,
   getPayrollExportBatchDetailController,
   getTimesheetDetailController,
+  listPayrollPeriodsController,
   listTimesheetsController,
   listPayrollExportBatchesController,
+  lockPayrollPeriodController,
   payrollSummaryController,
+  reopenPayrollPeriodController,
   reopenPayrollExportBatchController,
   reissuePayrollExportBatchController,
   resolveTimesheetController,
@@ -55,6 +60,12 @@ export function createAdminRoutes() {
   router.post("/users", createAdminUserController);
   router.patch("/users/:userId/status", setAdminUserStatusController);
   router.patch("/users/:userId/role", setAdminUserRoleController);
+
+  router.get("/pay-periods", listPayrollPeriodsController);
+  router.post("/pay-periods", createPayrollPeriodController);
+  router.get("/pay-periods/:periodId", getPayrollPeriodDetailController);
+  router.post("/pay-periods/:periodId/lock", lockPayrollPeriodController);
+  router.post("/pay-periods/:periodId/reopen", reopenPayrollPeriodController);
 
   router.get("/payroll-exports", listPayrollExportBatchesController);
   router.post("/payroll-exports", createPayrollExportBatchController);

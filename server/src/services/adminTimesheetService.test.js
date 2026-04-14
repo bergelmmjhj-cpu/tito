@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parsePayrollExportBatchActionPayload, parseTimesheetResolutionPayload } from "./adminTimesheetService.js";
+import {
+  parsePayrollExportBatchActionPayload,
+  parsePayrollPeriodPayload,
+  parseTimesheetResolutionPayload,
+} from "./adminTimesheetService.js";
 
 test("parseTimesheetResolutionPayload requires at least one actionable change", () => {
   assert.throws(
@@ -79,4 +83,23 @@ test("parsePayrollExportBatchActionPayload requires a reopen note", () => {
 test("parsePayrollExportBatchActionPayload trims and returns the note", () => {
   const parsed = parsePayrollExportBatchActionPayload({ note: "  Payroll requested corrections.  " });
   assert.equal(parsed.note, "Payroll requested corrections.");
+});
+
+test("parsePayrollPeriodPayload requires YYYY-MM-DD dates", () => {
+  assert.throws(
+    () => parsePayrollPeriodPayload({ startDate: "04/01/2026", endDate: "2026-04-14" }),
+    /startDate must use YYYY-MM-DD format/
+  );
+});
+
+test("parsePayrollPeriodPayload validates range order", () => {
+  assert.throws(
+    () => parsePayrollPeriodPayload({ startDate: "2026-04-15", endDate: "2026-04-01" }),
+    /startDate must be on or before endDate/
+  );
+});
+
+test("parsePayrollPeriodPayload derives a default label", () => {
+  const parsed = parsePayrollPeriodPayload({ startDate: "2026-04-01", endDate: "2026-04-14" });
+  assert.equal(parsed.label, "2026-04-01 to 2026-04-14");
 });

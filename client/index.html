@@ -285,6 +285,11 @@
         <div class="filter-panel">
           <label>Date From<input id="tsDateFrom" type="date" /></label>
           <label>Date To<input id="tsDateTo" type="date" /></label>
+          <label>Pay Period
+            <select id="tsPayPeriodFilter">
+              <option value="">All pay periods</option>
+            </select>
+          </label>
           <label>Search Worker<input id="tsSearch" type="text" placeholder="Name, email or staff ID" /></label>
           <label>Workplace
             <select id="tsWorkplaceFilter">
@@ -319,6 +324,24 @@
             <button id="clearTimesheetFiltersBtn" type="button" class="ghost">Clear</button>
           </div>
         </div>
+        <section class="pay-periods-panel">
+          <div class="topbar">
+            <h3>Pay Periods</h3>
+          </div>
+          <p class="muted">Create pay periods, filter payroll work by period, and lock a period once every payroll-ready shift in it has been exported.</p>
+          <form id="createPayPeriodForm" class="filter-panel compact-panel">
+            <label>Label<input name="label" type="text" maxlength="120" placeholder="2026-04-01 to 2026-04-14" /></label>
+            <label>Start Date<input name="startDate" type="date" required /></label>
+            <label>End Date<input name="endDate" type="date" required /></label>
+            <div class="filter-actions">
+              <button type="submit">Create Pay Period</button>
+            </div>
+          </form>
+          <p id="payPeriodActionMessage" class="action-feedback hidden"></p>
+          <div id="payPeriodsList" class="pay-periods-list">
+            <p class="muted">No pay periods yet.</p>
+          </div>
+        </section>
         <div id="timesheetSummaryCards" class="timesheet-summary-grid"></div>
         <section class="payroll-exports-panel">
           <div class="topbar">

@@ -1,13 +1,19 @@
 import {
+  createAdminPayrollPeriod,
   createAdminPayrollExportBatch,
   buildTimesheetsCsv,
+  getAdminPayrollPeriodDetail,
   getAdminPayrollExportBatchDetail,
   getAdminPayrollExportBatchCsv,
   getAdminPayrollSummary,
   getAdminTimesheetDetail,
+  listAdminPayrollPeriods,
   listAdminPayrollExportBatches,
   listAdminTimesheets,
+  lockAdminPayrollPeriod,
+  parsePayrollPeriodPayload,
   parseTimesheetFilters,
+  reopenAdminPayrollPeriod,
   reopenAdminPayrollExportBatch,
   reissueAdminPayrollExportBatch,
   resolveAdminTimesheet,
@@ -97,6 +103,94 @@ export async function payrollSummaryController(req, res) {
     console.error("[admin.timesheets.payroll] failed", {
       adminUserId: req.user?.id || null,
       query: req.query || {},
+      message: error?.message || "unknown_error",
+      name: error?.name || "Error",
+      stack: error?.stack || "no_stack",
+    });
+    const err = toHttpError(error);
+    res.status(err.status).json({ error: err.message });
+  }
+}
+
+export async function listPayrollPeriodsController(req, res) {
+  try {
+    const rawLimit = Number(req.query?.limit);
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : 12;
+    const periods = await listAdminPayrollPeriods(limit);
+    res.json({ periods });
+  } catch (error) {
+    console.error("[admin.pay-periods.list] failed", {
+      adminUserId: req.user?.id || null,
+      query: req.query || {},
+      message: error?.message || "unknown_error",
+      name: error?.name || "Error",
+      stack: error?.stack || "no_stack",
+    });
+    const err = toHttpError(error);
+    res.status(err.status).json({ error: err.message });
+  }
+}
+
+export async function getPayrollPeriodDetailController(req, res) {
+  try {
+    const period = await getAdminPayrollPeriodDetail(req.params.periodId);
+    res.json({ period });
+  } catch (error) {
+    console.error("[admin.pay-periods.detail] failed", {
+      adminUserId: req.user?.id || null,
+      periodId: req.params.periodId,
+      message: error?.message || "unknown_error",
+      name: error?.name || "Error",
+      stack: error?.stack || "no_stack",
+    });
+    const err = toHttpError(error);
+    res.status(err.status).json({ error: err.message });
+  }
+}
+
+export async function createPayrollPeriodController(req, res) {
+  try {
+    const payload = parsePayrollPeriodPayload(req.body || {});
+    const period = await createAdminPayrollPeriod(payload, req.user);
+    res.status(201).json({ period });
+  } catch (error) {
+    console.error("[admin.pay-periods.create] failed", {
+      adminUserId: req.user?.id || null,
+      body: req.body || {},
+      message: error?.message || "unknown_error",
+      name: error?.name || "Error",
+      stack: error?.stack || "no_stack",
+    });
+    const err = toHttpError(error);
+    res.status(err.status).json({ error: err.message });
+  }
+}
+
+export async function lockPayrollPeriodController(req, res) {
+  try {
+    const period = await lockAdminPayrollPeriod(req.params.periodId, req.user);
+    res.json({ period });
+  } catch (error) {
+    console.error("[admin.pay-periods.lock] failed", {
+      adminUserId: req.user?.id || null,
+      periodId: req.params.periodId,
+      message: error?.message || "unknown_error",
+      name: error?.name || "Error",
+      stack: error?.stack || "no_stack",
+    });
+    const err = toHttpError(error);
+    res.status(err.status).json({ error: err.message });
+  }
+}
+
+export async function reopenPayrollPeriodController(req, res) {
+  try {
+    const period = await reopenAdminPayrollPeriod(req.params.periodId, req.user);
+    res.json({ period });
+  } catch (error) {
+    console.error("[admin.pay-periods.reopen] failed", {
+      adminUserId: req.user?.id || null,
+      periodId: req.params.periodId,
       message: error?.message || "unknown_error",
       name: error?.name || "Error",
       stack: error?.stack || "no_stack",

@@ -8,6 +8,14 @@ import {
   reopenPayrollExportBatch,
 } from "../models/payrollExportBatchModel.js";
 import {
+  createPayrollPeriod,
+  getPayrollPeriodById,
+  getPayrollPeriodForBusinessDate,
+  listPayrollPeriods,
+  lockPayrollPeriod,
+  reopenPayrollPeriod,
+} from "../models/payrollPeriodModel.js";
+import {
   applyAdminShiftResolution,
   getAllShifts,
   getAllTimeLogs,
@@ -26,6 +34,7 @@ const PAYROLL_STATUSES = new Set(["pending", "approved", "exported"]);
 const MANUAL_PAYROLL_STATUSES = new Set(["pending", "approved"]);
 const ADMIN_REVIEW_NOTE_MAX_LENGTH = 1000;
 const PAYROLL_BATCH_NOTE_MAX_LENGTH = 1000;
+const PAYROLL_PERIOD_LABEL_MAX_LENGTH = 120;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -93,7 +102,7 @@ function firstLogOfType(shiftLogs, actionType) {
 // Row builder
 // ---------------------------------------------------------------------------
 
-function buildTimesheetRow(shift, user, shiftLogs, workplaceIndex, userIndex = {}) {
+function buildTimesheetRow(shift, user, shiftLogs, workplaceIndex, userIndex = {}, payPeriod = null) {
   const clockInLog = firstLogOfType(shiftLogs, "clock_in");
   const clockOutLog = firstLogOfType(shiftLogs, "clock_out");
 
@@ -161,6 +170,11 @@ function buildTimesheetRow(shift, user, shiftLogs, workplaceIndex, userIndex = {
     workerStaffId: user?.staffId || null,
     date: businessDate,
     businessTimeZone,
+    payPeriodId: payPeriod?.id || null,
+    payPeriodLabel: payPeriod?.label || null,
+    payPeriodStatus: payPeriod?.status || null,
+    payPeriodStartDate: payPeriod?.startDate || null,
+    payPeriodEndDate: payPeriod?.endDate || null,
     status,
     clockInAt: shift.clockInAt || null,
     clockOutAt: shift.clockOutAt || null,
@@ -313,12 +327,114 @@ function sanitizeExportFilters(filters) {
   return {
     dateFrom: filters.dateFrom || null,
     dateTo: filters.dateTo || null,
+    payPeriodId: filters.payPeriodId || null,
     workerId: filters.workerId || null,
     search: filters.search || null,
     workplaceId: filters.workplaceId || null,
     status: filters.status || "",
     payrollStatus: filters.payrollStatus || "",
   };
+}
+
+function normalizePayrollPeriodLabel(value, startDate, endDate) {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim().slice(0, PAYROLL_PERIOD_LABEL_MAX_LENGTH);
+  }
+
+  return `${startDate} to ${endDate}`;
+}
+
+function parseRequiredBusinessDate(value, label) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+    throw new HttpError(400, `${label} must use YYYY-MM-DD format`);
+  }
+
+  return value.trim();
+}
+
+function findPayrollPeriodForDate(businessDate, periods) {
+  if (typeof businessDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) {
+    return null;
+  }
+
+  return periods.find((period) => period.startDate <= businessDate && period.endDate >= businessDate) || null;
+}
+
+function buildPayrollPeriodIndex(periods) {
+  return periods.reduce((index, period) => {
+    index[period.id] = period;
+    return index;
+  }, {});
+}
+
+function createEmptyPayrollPeriodCounts() {
+  return {
+    shiftCount: 0,
+    readyCount: 0,
+    pendingCount: 0,
+    approvedCount: 0,
+    exportedCount: 0,
+  };
+}
+
+function buildPayrollPeriodCounts(periods, rows) {
+  const counts = new Map(periods.map((period) => [period.id, createEmptyPayrollPeriodCounts()]));
+
+  for (const row of rows) {
+    if (!row?.payPeriodId || !counts.has(row.payPeriodId)) continue;
+    const summary = counts.get(row.payPeriodId);
+    summary.shiftCount += 1;
+    if (row.readyForPayroll && row.payrollStatus !== "exported") {
+      summary.readyCount += 1;
+    }
+    if (row.payrollStatus === "pending") summary.pendingCount += 1;
+    if (row.payrollStatus === "approved") summary.approvedCount += 1;
+    if (row.payrollStatus === "exported") summary.exportedCount += 1;
+  }
+
+  return counts;
+}
+
+function assertEditablePayPeriod(period) {
+  if (period?.status === "locked") {
+    throw new HttpError(409, `Pay period ${period.label} is locked. Reopen the pay period before making changes.`);
+  }
+}
+
+function resolveExportPayPeriod(rows, requestedPayPeriodId, payPeriodIndex) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new HttpError(409, "No payroll-approved shifts are available in the current filtered view");
+  }
+
+  if (rows.some((row) => !row?.payPeriodId)) {
+    throw new HttpError(409, "Every exported shift must belong to a pay period. Create a pay period covering these business dates first.");
+  }
+
+  const distinctPeriodIds = [...new Set(rows.map((row) => row.payPeriodId))];
+
+  if (requestedPayPeriodId && distinctPeriodIds.some((periodId) => periodId !== requestedPayPeriodId)) {
+    throw new HttpError(409, "Payroll export filters span multiple pay periods. Filter to a single pay period before exporting.");
+  }
+
+  if (!requestedPayPeriodId && distinctPeriodIds.length > 1) {
+    throw new HttpError(409, "Payroll export filters span multiple pay periods. Filter to a single pay period before exporting.");
+  }
+
+  const targetPeriodId = requestedPayPeriodId || distinctPeriodIds[0] || null;
+  if (!targetPeriodId) {
+    throw new HttpError(409, "Select or create a pay period before exporting payroll.");
+  }
+
+  const payPeriod = payPeriodIndex[targetPeriodId] || null;
+  if (!payPeriod) {
+    throw new HttpError(404, "Pay period not found");
+  }
+
+  if (payPeriod.status !== "open") {
+    throw new HttpError(409, `Pay period ${payPeriod.label} is locked. Reopen it before exporting payroll.`);
+  }
+
+  return payPeriod;
 }
 
 function parseDate(value) {
@@ -329,15 +445,17 @@ function parseDate(value) {
 }
 
 async function getFilteredTimesheetRows(filters) {
-  const [users, workplaces, shifts, timeLogs] = await Promise.all([
+  const [users, workplaces, shifts, timeLogs, payrollPeriods] = await Promise.all([
     buildUserIndex(),
     buildWorkplaceIndex(),
     getAllShifts(),
     getAllTimeLogs(),
+    listPayrollPeriods(MAX_PAGE_LIMIT),
   ]);
   const userIndex = users;
   const workplaceIndex = workplaces;
   const logsByShift = buildLogsByShift(timeLogs || []);
+  const periods = payrollPeriods || [];
 
   const rows = (shifts || []).map((shift) =>
     buildTimesheetRow(
@@ -345,11 +463,13 @@ async function getFilteredTimesheetRows(filters) {
       userIndex[shift.userId] || null,
       logsByShift[shift.id] || [],
       workplaceIndex,
-      userIndex
+      userIndex,
+      findPayrollPeriodForDate(shift.businessDate, periods)
     )
   );
 
   return rows.filter((row) => {
+    if (filters.payPeriodId && row.payPeriodId !== filters.payPeriodId) return false;
     if (filters.workerId && row.workerId !== filters.workerId) return false;
     if (filters.search && !matchesSearch(row, filters.search)) return false;
     if (filters.workplaceId && row.workplaceId !== filters.workplaceId) return false;
@@ -378,6 +498,7 @@ export function parseTimesheetFilters(query) {
   const {
     dateFrom,
     dateTo,
+    payPeriodId,
     workerId,
     search,
     workplaceId,
@@ -430,6 +551,7 @@ export function parseTimesheetFilters(query) {
   return {
     dateFrom: dateFromParsed ? dateFromParsed.toISOString().slice(0, 10) : null,
     dateTo: dateToParsed ? dateToParsed.toISOString().slice(0, 10) : null,
+    payPeriodId: typeof payPeriodId === "string" && payPeriodId.trim() ? payPeriodId.trim() : null,
     workerId: typeof workerId === "string" && workerId.trim() ? workerId.trim() : null,
     search: typeof search === "string" && search.trim() ? search.trim() : null,
     workplaceId: typeof workplaceId === "string" && workplaceId.trim() ? workplaceId.trim() : null,
@@ -489,6 +611,7 @@ export async function getAdminPayrollSummary(filters) {
     dateFrom: filters.dateFrom,
     dateTo: filters.dateTo,
     filters: {
+      payPeriodId: filters.payPeriodId,
       workerId: filters.workerId,
       search: filters.search,
       workplaceId: filters.workplaceId,
@@ -529,28 +652,127 @@ function buildCsvFromRows(rows) {
   return [header, ...lines].join("\r\n");
 }
 
-function enrichPayrollExportBatch(batch, userIndex) {
+function enrichPayrollExportBatch(batch, userIndex, payPeriodIndex = {}) {
+  const payPeriod = batch.payPeriodId ? payPeriodIndex[batch.payPeriodId] || null : null;
+
   return {
     ...batch,
     createdByName: batch.createdBy ? userIndex[batch.createdBy]?.name || null : null,
     reopenedByName: batch.reopenedBy ? userIndex[batch.reopenedBy]?.name || null : null,
+    payPeriodLabel: payPeriod?.label || null,
+    payPeriodStatus: payPeriod?.status || null,
+    payPeriodStartDate: payPeriod?.startDate || null,
+    payPeriodEndDate: payPeriod?.endDate || null,
   };
 }
 
-function summarizeRelatedPayrollBatch(batch, userIndex) {
+function summarizeRelatedPayrollBatch(batch, userIndex, payPeriodIndex = {}) {
   if (!batch) return null;
+  const payPeriod = batch.payPeriodId ? payPeriodIndex[batch.payPeriodId] || null : null;
   return {
     id: batch.id,
     status: batch.status,
     createdAt: batch.createdAt,
     createdByName: batch.createdBy ? userIndex[batch.createdBy]?.name || null : null,
     fileName: batch.fileName,
+    payPeriodLabel: payPeriod?.label || null,
+  };
+}
+
+function enrichPayrollPeriod(period, userIndex, counts = createEmptyPayrollPeriodCounts()) {
+  return {
+    ...period,
+    createdByName: period.createdBy ? userIndex[period.createdBy]?.name || null : null,
+    lockedByName: period.lockedBy ? userIndex[period.lockedBy]?.name || null : null,
+    reopenedByName: period.reopenedBy ? userIndex[period.reopenedBy]?.name || null : null,
+    counts,
   };
 }
 
 export async function listAdminPayrollExportBatches(limit = 10) {
-  const [batches, userIndex] = await Promise.all([listPayrollExportBatches(limit), buildUserIndex()]);
-  return batches.map((batch) => enrichPayrollExportBatch(batch, userIndex));
+  const [batches, userIndex, payPeriods] = await Promise.all([
+    listPayrollExportBatches(limit),
+    buildUserIndex(),
+    listPayrollPeriods(MAX_PAGE_LIMIT),
+  ]);
+  const payPeriodIndex = buildPayrollPeriodIndex(payPeriods);
+  return batches.map((batch) => enrichPayrollExportBatch(batch, userIndex, payPeriodIndex));
+}
+
+export async function listAdminPayrollPeriods(limit = 12) {
+  const [periods, userIndex, rows] = await Promise.all([
+    listPayrollPeriods(limit),
+    buildUserIndex(),
+    getFilteredTimesheetRows({}),
+  ]);
+  const counts = buildPayrollPeriodCounts(periods, rows);
+  return periods.map((period) => enrichPayrollPeriod(period, userIndex, counts.get(period.id)));
+}
+
+export async function getAdminPayrollPeriodDetail(periodId) {
+  if (!periodId || typeof periodId !== "string") {
+    throw new HttpError(400, "periodId is required");
+  }
+
+  const [period, userIndex, rows] = await Promise.all([
+    getPayrollPeriodById(periodId),
+    buildUserIndex(),
+    getFilteredTimesheetRows({ payPeriodId: periodId }),
+  ]);
+  if (!period) throw new HttpError(404, "Pay period not found");
+
+  const counts = buildPayrollPeriodCounts([period], rows);
+  return enrichPayrollPeriod(period, userIndex, counts.get(period.id));
+}
+
+export function parsePayrollPeriodPayload(payload = {}) {
+  const startDate = parseRequiredBusinessDate(payload.startDate, "startDate");
+  const endDate = parseRequiredBusinessDate(payload.endDate, "endDate");
+
+  if (startDate > endDate) {
+    throw new HttpError(400, "startDate must be on or before endDate");
+  }
+
+  return {
+    startDate,
+    endDate,
+    label: normalizePayrollPeriodLabel(payload.label, startDate, endDate),
+  };
+}
+
+export async function createAdminPayrollPeriod(payload, actor) {
+  if (!actor?.id) throw new HttpError(401, "Admin user is required");
+
+  const parsed = parsePayrollPeriodPayload(payload || {});
+  const period = await createPayrollPeriod({
+    actorUserId: actor.id,
+    startDate: parsed.startDate,
+    endDate: parsed.endDate,
+    label: parsed.label,
+  });
+  return getAdminPayrollPeriodDetail(period.id);
+}
+
+export async function lockAdminPayrollPeriod(periodId, actor) {
+  if (!actor?.id) throw new HttpError(401, "Admin user is required");
+
+  const currentPeriod = await getAdminPayrollPeriodDetail(periodId);
+  if ((currentPeriod.counts?.readyCount || 0) > 0) {
+    throw new HttpError(
+      409,
+      `Pay period ${currentPeriod.label} still has ${currentPeriod.counts.readyCount} payroll-ready shift(s) that are not exported.`
+    );
+  }
+
+  await lockPayrollPeriod(periodId, actor.id);
+  return getAdminPayrollPeriodDetail(periodId);
+}
+
+export async function reopenAdminPayrollPeriod(periodId, actor) {
+  if (!actor?.id) throw new HttpError(401, "Admin user is required");
+
+  await reopenPayrollPeriod(periodId, actor.id);
+  return getAdminPayrollPeriodDetail(periodId);
 }
 
 export async function getAdminPayrollExportBatchDetail(batchId) {
@@ -558,8 +780,13 @@ export async function getAdminPayrollExportBatchDetail(batchId) {
     throw new HttpError(400, "batchId is required");
   }
 
-  const [batch, userIndex] = await Promise.all([getPayrollExportBatchById(batchId), buildUserIndex()]);
+  const [batch, userIndex, payPeriods] = await Promise.all([
+    getPayrollExportBatchById(batchId),
+    buildUserIndex(),
+    listPayrollPeriods(MAX_PAGE_LIMIT),
+  ]);
   if (!batch) throw new HttpError(404, "Payroll export batch not found");
+  const payPeriodIndex = buildPayrollPeriodIndex(payPeriods);
 
   const [supersedesBatch, replacedByBatch] = await Promise.all([
     batch.supersedesBatchId ? getPayrollExportBatchById(batch.supersedesBatchId) : Promise.resolve(null),
@@ -567,9 +794,9 @@ export async function getAdminPayrollExportBatchDetail(batchId) {
   ]);
 
   return {
-    ...enrichPayrollExportBatch(batch, userIndex),
-    supersedesBatch: summarizeRelatedPayrollBatch(supersedesBatch, userIndex),
-    replacedByBatch: summarizeRelatedPayrollBatch(replacedByBatch, userIndex),
+    ...enrichPayrollExportBatch(batch, userIndex, payPeriodIndex),
+    supersedesBatch: summarizeRelatedPayrollBatch(supersedesBatch, userIndex, payPeriodIndex),
+    replacedByBatch: summarizeRelatedPayrollBatch(replacedByBatch, userIndex, payPeriodIndex),
   };
 }
 
@@ -592,31 +819,47 @@ export function parsePayrollExportBatchActionPayload(payload = {}) {
 export async function createAdminPayrollExportBatch(filters, actor) {
   if (!actor?.id) throw new HttpError(401, "Admin user is required");
 
-  const rows = await getFilteredTimesheetRows({
-    ...filters,
-    page: 1,
-    limit: MAX_PAGE_LIMIT * 100,
-  });
+  const [rows, payPeriods] = await Promise.all([
+    getFilteredTimesheetRows({
+      ...filters,
+      page: 1,
+      limit: MAX_PAGE_LIMIT * 100,
+    }),
+    listPayrollPeriods(MAX_PAGE_LIMIT),
+  ]);
   const exportRows = rows.filter(isEligibleForPayrollExport);
 
   if (exportRows.length === 0) {
     throw new HttpError(409, "No payroll-approved shifts are available in the current filtered view");
   }
 
+  const payPeriodIndex = buildPayrollPeriodIndex(payPeriods);
+  const payPeriod = resolveExportPayPeriod(exportRows, filters.payPeriodId, payPeriodIndex);
+
   const csvContent = buildCsvFromRows(exportRows);
   const batch = await createPayrollExportBatch({
     actorUserId: actor.id,
-    filters: sanitizeExportFilters(filters),
+    filters: sanitizeExportFilters({ ...filters, payPeriodId: payPeriod.id }),
     rows: exportRows,
     csvContent,
+    payPeriodId: payPeriod.id,
   });
 
   const userIndex = await buildUserIndex();
-  return enrichPayrollExportBatch(batch, userIndex);
+  return enrichPayrollExportBatch(batch, userIndex, payPeriodIndex);
 }
 
 export async function reopenAdminPayrollExportBatch(batchId, payload, actor) {
   if (!actor?.id) throw new HttpError(401, "Admin user is required");
+
+  const currentBatch = await getPayrollExportBatchById(batchId);
+  if (!currentBatch) throw new HttpError(404, "Payroll export batch not found");
+  if (currentBatch.payPeriodId) {
+    const payPeriod = await getPayrollPeriodById(currentBatch.payPeriodId);
+    if (payPeriod?.status === "locked") {
+      throw new HttpError(409, `Pay period ${payPeriod.label} is locked. Reopen the pay period before reopening its payroll export batch.`);
+    }
+  }
 
   const parsed = parsePayrollExportBatchActionPayload(payload || {});
   await reopenPayrollExportBatch(batchId, actor.id, parsed.note);
@@ -630,6 +873,12 @@ export async function reissueAdminPayrollExportBatch(batchId, actor) {
   if (!currentBatch) throw new HttpError(404, "Payroll export batch not found");
   if (currentBatch.status !== "reopened") {
     throw new HttpError(409, "Payroll export batch must be reopened before it can be reissued");
+  }
+  if (currentBatch.payPeriodId) {
+    const payPeriod = await getPayrollPeriodById(currentBatch.payPeriodId);
+    if (payPeriod?.status === "locked") {
+      throw new HttpError(409, `Pay period ${payPeriod.label} is locked. Reopen the pay period before reissuing payroll.`);
+    }
   }
 
   const currentRows = await getTimesheetRowsByShiftIds(currentBatch.shiftIds || []);
@@ -648,6 +897,7 @@ export async function reissueAdminPayrollExportBatch(batchId, actor) {
     filters: currentBatch.filters || {},
     rows: exportRows,
     csvContent,
+    payPeriodId: currentBatch.payPeriodId || null,
     supersedesBatchId: currentBatch.id,
   });
 
@@ -663,14 +913,15 @@ export async function getAdminTimesheetDetail(shiftId) {
   const shift = await getShiftById(shiftId);
   if (!shift) throw new HttpError(404, "Shift not found");
 
-  const [userIndex, workplaceIndex, shiftLogs] = await Promise.all([
+  const [userIndex, workplaceIndex, shiftLogs, payPeriod] = await Promise.all([
     buildUserIndex(),
     buildWorkplaceIndex(),
     getTimeLogsForShift(shiftId),
+    shift.businessDate ? getPayrollPeriodForBusinessDate(shift.businessDate) : Promise.resolve(null),
   ]);
   const user = userIndex[shift.userId] || null;
 
-  const row = buildTimesheetRow(shift, user, shiftLogs, workplaceIndex, userIndex);
+  const row = buildTimesheetRow(shift, user, shiftLogs, workplaceIndex, userIndex, payPeriod);
 
   // Build enriched action history
   const actions = shiftLogs
@@ -728,6 +979,13 @@ export function parseTimesheetResolutionPayload(payload = {}) {
 export async function resolveAdminTimesheet(shiftId, payload, actor) {
   if (!actor?.id) throw new HttpError(401, "Admin user is required");
 
+  const shift = await getShiftById(shiftId);
+  if (!shift) throw new HttpError(404, "Shift not found");
+  if (shift.businessDate) {
+    const payPeriod = await getPayrollPeriodForBusinessDate(shift.businessDate);
+    assertEditablePayPeriod(payPeriod);
+  }
+
   const parsed = parseTimesheetResolutionPayload(payload);
   await applyAdminShiftResolution(shiftId, actor.id, {
     ...parsed,
@@ -748,6 +1006,8 @@ const CSV_COLUMNS = [
   { header: "Email", key: "workerEmail" },
   { header: "Business Date", key: "date" },
   { header: "Business Time Zone", key: "businessTimeZone" },
+  { header: "Pay Period", key: "payPeriodLabel" },
+  { header: "Pay Period Status", key: "payPeriodStatus" },
   { header: "Status", key: "status" },
   { header: "Clock In", key: "clockInAt" },
   { header: "Clock Out", key: "clockOutAt" },

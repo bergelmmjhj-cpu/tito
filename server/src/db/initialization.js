@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -5,7 +6,6 @@ import { buildShiftHourSummary } from "../services/payableHoursService.js";
 import { initializePool } from "./pool.js";
 import { initializeSchema, getSchemaVersion, setSchemaVersion } from "./schema.js";
 import { query, withClient } from "./pool.js";
-import crypto from "node:crypto";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -107,9 +107,36 @@ async function applySchemaAlterations() {
     `ALTER TABLE shifts ADD COLUMN IF NOT EXISTS payroll_export_batch_id TEXT`,
     `CREATE INDEX IF NOT EXISTS idx_shifts_payroll_status ON shifts(payroll_status)`,
     `CREATE INDEX IF NOT EXISTS idx_shifts_payroll_export_batch_id ON shifts(payroll_export_batch_id)`,
+    `CREATE TABLE IF NOT EXISTS payroll_periods (
+      id TEXT PRIMARY KEY,
+      label VARCHAR(120) NOT NULL,
+      start_date DATE NOT NULL,
+      end_date DATE NOT NULL,
+      status VARCHAR(50) NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'locked')),
+      created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      locked_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+      locked_at TIMESTAMP,
+      reopened_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+      reopened_at TIMESTAMP
+    )`,
+    `ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS label VARCHAR(120)`,
+    `ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS start_date DATE`,
+    `ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS end_date DATE`,
+    `ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'open'`,
+    `ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS created_by TEXT REFERENCES users(id) ON DELETE SET NULL`,
+    `ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
+    `ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS locked_by TEXT REFERENCES users(id) ON DELETE SET NULL`,
+    `ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS locked_at TIMESTAMP`,
+    `ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS reopened_by TEXT REFERENCES users(id) ON DELETE SET NULL`,
+    `ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS reopened_at TIMESTAMP`,
+    `CREATE INDEX IF NOT EXISTS idx_payroll_periods_start_date ON payroll_periods(start_date)`,
+    `CREATE INDEX IF NOT EXISTS idx_payroll_periods_end_date ON payroll_periods(end_date)`,
+    `CREATE INDEX IF NOT EXISTS idx_payroll_periods_status ON payroll_periods(status)`,
     `CREATE TABLE IF NOT EXISTS payroll_export_batches (
       id TEXT PRIMARY KEY,
       status VARCHAR(50) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'reopened', 'replaced')),
+      pay_period_id TEXT REFERENCES payroll_periods(id) ON DELETE SET NULL,
       created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
       reopened_by TEXT REFERENCES users(id) ON DELETE SET NULL,
       reopened_at TIMESTAMP,
@@ -126,6 +153,7 @@ async function applySchemaAlterations() {
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `ALTER TABLE payroll_export_batches ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'active'`,
+    `ALTER TABLE payroll_export_batches ADD COLUMN IF NOT EXISTS pay_period_id TEXT REFERENCES payroll_periods(id) ON DELETE SET NULL`,
     `ALTER TABLE payroll_export_batches ADD COLUMN IF NOT EXISTS reopened_by TEXT REFERENCES users(id) ON DELETE SET NULL`,
     `ALTER TABLE payroll_export_batches ADD COLUMN IF NOT EXISTS reopened_at TIMESTAMP`,
     `ALTER TABLE payroll_export_batches ADD COLUMN IF NOT EXISTS reopened_note TEXT`,
@@ -133,6 +161,7 @@ async function applySchemaAlterations() {
     `ALTER TABLE payroll_export_batches ADD COLUMN IF NOT EXISTS replaced_by_batch_id TEXT REFERENCES payroll_export_batches(id) ON DELETE SET NULL`,
     `CREATE INDEX IF NOT EXISTS idx_payroll_export_batches_created_at ON payroll_export_batches(created_at)`,
     `CREATE INDEX IF NOT EXISTS idx_payroll_export_batches_created_by ON payroll_export_batches(created_by)`,
+    `CREATE INDEX IF NOT EXISTS idx_payroll_export_batches_pay_period_id ON payroll_export_batches(pay_period_id)`,
     `CREATE INDEX IF NOT EXISTS idx_payroll_export_batches_status ON payroll_export_batches(status)`,
     `CREATE INDEX IF NOT EXISTS idx_payroll_export_batches_supersedes ON payroll_export_batches(supersedes_batch_id)`,
     `CREATE INDEX IF NOT EXISTS idx_payroll_export_batches_replaced_by ON payroll_export_batches(replaced_by_batch_id)`,
@@ -325,17 +354,43 @@ async function migrateFromJsonIfExists() {
         }
 
         if (Array.isArray(data.payrollExportBatches) && data.payrollExportBatches.length > 0) {
+          if (Array.isArray(data.payrollPeriods) && data.payrollPeriods.length > 0) {
+            for (const period of data.payrollPeriods) {
+              await client.query(
+                `INSERT INTO payroll_periods (
+                  id, label, start_date, end_date, status, created_by, created_at, locked_by, locked_at, reopened_by, reopened_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                ON CONFLICT (id) DO NOTHING`,
+                [
+                  period.id,
+                  period.label || `${period.startDate || ""} to ${period.endDate || ""}`.trim(),
+                  period.startDate || null,
+                  period.endDate || null,
+                  period.status || "open",
+                  period.createdBy || null,
+                  period.createdAt || new Date().toISOString(),
+                  period.lockedBy || null,
+                  period.lockedAt || null,
+                  period.reopenedBy || null,
+                  period.reopenedAt || null,
+                ]
+              );
+            }
+            console.log(`Migrated ${data.payrollPeriods.length} payroll periods`);
+          }
+
           for (const batch of data.payrollExportBatches) {
             await client.query(
               `INSERT INTO payroll_export_batches (
-                id, status, created_by, reopened_by, reopened_at, reopened_note,
+                id, status, pay_period_id, created_by, reopened_by, reopened_at, reopened_note,
                 supersedes_batch_id, replaced_by_batch_id,
                 shift_count, total_payable_hours, filters, shift_ids, rows_snapshot, csv_content, file_name, created_at
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14, $15, $16)
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16, $17)
               ON CONFLICT (id) DO NOTHING`,
               [
                 batch.id,
                 batch.status || "active",
+                batch.payPeriodId || null,
                 batch.createdBy || null,
                 batch.reopenedBy || null,
                 batch.reopenedAt || null,
@@ -435,11 +490,12 @@ export async function writeDatabaseToJson(db) {
 
 function createInitialDatabase() {
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     users: [],
     workplaces: [],
     shifts: [],
     timeLogs: [],
+    payrollPeriods: [],
     payrollExportBatches: [],
   };
 }

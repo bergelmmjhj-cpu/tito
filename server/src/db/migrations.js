@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { createPasswordHash } from "../utils/password.js";
 import { buildShiftHourSummary } from "../services/payableHoursService.js";
 
-export const CURRENT_SCHEMA_VERSION = 8;
+export const CURRENT_SCHEMA_VERSION = 9;
 
 const DEFAULT_BOOTSTRAP_ADMIN = {
   firstName: "System",
@@ -109,6 +109,7 @@ export function createInitialDatabase() {
     workplaces: [],
     shifts: [],
     timeLogs: [],
+    payrollPeriods: [],
     payrollExportBatches: [],
   };
 }
@@ -124,6 +125,7 @@ export function migrateDatabase(db) {
     workplaces: Array.isArray(db.workplaces) ? db.workplaces : [],
     shifts: Array.isArray(db.shifts) ? db.shifts : [],
     timeLogs: Array.isArray(db.timeLogs) ? db.timeLogs : [],
+    payrollPeriods: Array.isArray(db.payrollPeriods) ? db.payrollPeriods : [],
     payrollExportBatches: Array.isArray(db.payrollExportBatches) ? db.payrollExportBatches : [],
   };
 
@@ -347,6 +349,42 @@ export function migrateDatabase(db) {
     };
   });
 
+  safe.payrollPeriods = safe.payrollPeriods.map((period) => {
+    const startDate =
+      typeof period?.startDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(period.startDate.trim())
+        ? period.startDate.trim()
+        : null;
+    const endDate =
+      typeof period?.endDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(period.endDate.trim())
+        ? period.endDate.trim()
+        : null;
+
+    return {
+      id: typeof period?.id === "string" && period.id.trim() ? period.id.trim() : crypto.randomUUID(),
+      label:
+        typeof period?.label === "string" && period.label.trim()
+          ? period.label.trim().slice(0, 120)
+          : `${startDate || ""} to ${endDate || ""}`.trim() || "Pay Period",
+      startDate,
+      endDate,
+      status: period?.status === "locked" ? "locked" : "open",
+      createdBy:
+        typeof period?.createdBy === "string" && period.createdBy.trim() ? period.createdBy.trim() : null,
+      createdAt:
+        typeof period?.createdAt === "string" && period.createdAt.trim()
+          ? period.createdAt.trim()
+          : new Date().toISOString(),
+      lockedBy:
+        typeof period?.lockedBy === "string" && period.lockedBy.trim() ? period.lockedBy.trim() : null,
+      lockedAt:
+        typeof period?.lockedAt === "string" && period.lockedAt.trim() ? period.lockedAt.trim() : null,
+      reopenedBy:
+        typeof period?.reopenedBy === "string" && period.reopenedBy.trim() ? period.reopenedBy.trim() : null,
+      reopenedAt:
+        typeof period?.reopenedAt === "string" && period.reopenedAt.trim() ? period.reopenedAt.trim() : null,
+    };
+  });
+
   safe.payrollExportBatches = safe.payrollExportBatches.map((batch) => ({
     id: typeof batch?.id === "string" && batch.id.trim() ? batch.id.trim() : crypto.randomUUID(),
     status:
@@ -355,6 +393,8 @@ export function migrateDatabase(db) {
         : "active",
     createdBy:
       typeof batch?.createdBy === "string" && batch.createdBy.trim() ? batch.createdBy.trim() : null,
+    payPeriodId:
+      typeof batch?.payPeriodId === "string" && batch.payPeriodId.trim() ? batch.payPeriodId.trim() : null,
     createdAt:
       typeof batch?.createdAt === "string" && batch.createdAt.trim()
         ? batch.createdAt.trim()

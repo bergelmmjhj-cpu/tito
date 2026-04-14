@@ -523,6 +523,60 @@ th {
   background: rgba(8, 18, 37, 0.38);
 }
 
+.pay-periods-panel {
+  margin: 10px 0 12px;
+  padding: 12px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line-soft);
+  background: rgba(8, 18, 37, 0.38);
+}
+
+.compact-panel {
+  margin-top: 10px;
+}
+
+.pay-periods-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.pay-period-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-soft);
+  background: rgba(8, 18, 37, 0.55);
+}
+
+.pay-period-copy {
+  min-width: 0;
+}
+
+.pay-period-title {
+  font-weight: 700;
+}
+
+.pay-period-meta {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.pay-period-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.status-badge-period-open { color: #34d399; }
+.status-badge-period-locked { color: #fca5a5; }
+
 .payroll-exports-list {
   display: grid;
   gap: 10px;
@@ -579,14 +633,17 @@ th {
 }
 
 @media (max-width: 720px) {
+  .pay-period-item,
   .payroll-export-item {
     flex-direction: column;
   }
 
+  .pay-period-actions,
   .payroll-export-actions {
     width: 100%;
   }
 
+  .pay-period-actions button,
   .payroll-export-actions button {
     width: 100%;
   }

@@ -33,6 +33,7 @@ function normalizeBatch(batch) {
   return {
     id: batch.id,
     status: normalizeBatchStatus(batch.status),
+    payPeriodId: batch.payPeriodId || null,
     createdBy: batch.createdBy || null,
     createdAt: batch.createdAt || null,
     reopenedBy: batch.reopenedBy || null,
@@ -70,6 +71,7 @@ function normalizeDbBatch(row) {
   return normalizeBatch({
     id: row.id,
     status: row.status,
+    payPeriodId: row.pay_period_id,
     createdBy: row.created_by,
     createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
     reopenedBy: row.reopened_by,
@@ -197,6 +199,7 @@ export async function createPayrollExportBatch({
   rows = [],
   csvContent = "",
   fileName,
+  payPeriodId = null,
   supersedesBatchId = null,
 }) {
   if (!actorUserId || typeof actorUserId !== "string") {
@@ -225,6 +228,7 @@ export async function createPayrollExportBatch({
   const batch = normalizeBatch({
     id: batchId,
     status: "active",
+    payPeriodId,
     createdBy: actorUserId,
     createdAt,
     reopenedBy: null,
@@ -295,13 +299,14 @@ export async function createPayrollExportBatch({
       let supersededBatch = null;
       if (supersedesBatchId) {
         const batchResult = await client.query(
-          `SELECT id, status, replaced_by_batch_id FROM payroll_export_batches WHERE id = $1 LIMIT 1 FOR UPDATE`,
+            `SELECT id, status, pay_period_id, replaced_by_batch_id FROM payroll_export_batches WHERE id = $1 LIMIT 1 FOR UPDATE`,
           [supersedesBatchId]
         );
         supersededBatch = batchResult.rows[0]
           ? normalizeBatch({
               id: batchResult.rows[0].id,
               status: batchResult.rows[0].status,
+                payPeriodId: batchResult.rows[0].pay_period_id,
               replacedByBatchId: batchResult.rows[0].replaced_by_batch_id,
             })
           : null;
@@ -328,13 +333,14 @@ export async function createPayrollExportBatch({
 
       await client.query(
         `INSERT INTO payroll_export_batches (
-          id, status, created_by, reopened_by, reopened_at, reopened_note,
+          id, status, pay_period_id, created_by, reopened_by, reopened_at, reopened_note,
           supersedes_batch_id, replaced_by_batch_id,
           shift_count, total_payable_hours, filters, shift_ids, rows_snapshot, csv_content, file_name, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14, $15, $16)`,
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16, $17)`,
         [
           batch.id,
           batch.status,
+          batch.payPeriodId,
           batch.createdBy,
           batch.reopenedBy,
           batch.reopenedAt,

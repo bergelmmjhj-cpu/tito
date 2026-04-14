@@ -290,11 +290,21 @@ Migration logic lives in:
 
 | Method | Path | Body | Description |
 |--------|------|------|-------------|
-| `GET` | `/api/admin/timesheets` | query `dateFrom`, `dateTo`, `search`, `workplaceId`, `status`, `payrollStatus`, `page`, `limit` | List business-date timesheets with review and payroll state |
+| `GET` | `/api/admin/timesheets` | query `dateFrom`, `dateTo`, `payPeriodId`, `search`, `workplaceId`, `status`, `payrollStatus`, `page`, `limit` | List business-date timesheets with review, payroll state, and pay period assignment |
 | `GET` | `/api/admin/timesheets/:shiftId` | - | Get detailed shift history, review metadata, and payroll metadata |
 | `PATCH` | `/api/admin/timesheets/:shiftId/resolve` | `{ "reviewStatus", "payrollStatus", "reviewNote", "closeOpenShiftAt?", "closeActiveBreakAt?", "payableHours?" }` | Resolve exceptions, move shifts between `pending` and `approved`, and create audit entries |
 | `GET` | `/api/admin/timesheets/summary/payroll` | same filters as list | Return filtered payroll readiness and approved/exported totals |
 | `GET` | `/api/admin/timesheets/export/csv` | same filters as list | Export filtered timesheets including payroll approval/export columns |
+
+### Payroll periods (admin only)
+
+| Method | Path | Body | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/admin/pay-periods` | query `limit?` | List recent pay periods with open or locked status and per-period payroll counts |
+| `POST` | `/api/admin/pay-periods` | `{ "label?", "startDate", "endDate" }` | Create a non-overlapping pay period for payroll review and export work |
+| `GET` | `/api/admin/pay-periods/:periodId` | - | Get pay period detail including status and current payroll counts |
+| `POST` | `/api/admin/pay-periods/:periodId/lock` | - | Lock a pay period after every payroll-ready shift in it has been exported |
+| `POST` | `/api/admin/pay-periods/:periodId/reopen` | - | Reopen a locked pay period so shifts and export batches in it can be corrected |
 
 ### Payroll export batches (admin only)
 
@@ -353,10 +363,12 @@ Existing v1 routes are still available:
 ## Timesheet payroll workflow
 
 - Review exceptions from the `Timesheets` screen using business-date filters.
+- Create a pay period before payroll export work if the target business dates are not already covered.
 - Mark a closed, reviewed shift as `Approved for payroll` when it is ready to leave operations review.
-- Create a payroll export batch from the approved shifts currently in view; this stores the exact exported CSV snapshot and marks those shifts as `Exported`.
+- Create a payroll export batch from approved shifts within one open pay period; this stores the exact exported CSV snapshot and marks those shifts as `Exported`.
 - Reopen a payroll export batch when payroll needs corrections; the batch retains its stored CSV snapshot and shifts return to `Approved` for correction.
 - Reissue a reopened batch after corrections to create a linked replacement export with explicit predecessor/successor history.
+- Lock a pay period after every payroll-ready shift in it has been exported to prevent further shift resolution or export changes until the period is reopened.
 
 ## CRM and geofencing readiness
 
