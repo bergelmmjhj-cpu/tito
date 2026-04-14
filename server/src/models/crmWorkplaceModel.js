@@ -18,6 +18,20 @@ export async function findWorkplaceByIdFromCrm(workplaceId) {
 function normalizeDbWorkplace(dbRow) {
   if (!dbRow) return null;
 
+  const crmData = (() => {
+    try {
+      return dbRow.crm
+        ? (typeof dbRow.crm === "string" ? JSON.parse(dbRow.crm) : dbRow.crm)
+        : {};
+    } catch {
+      return {};
+    }
+  })();
+
+  const crmAddress = crmData?.address && typeof crmData.address === "object"
+    ? crmData.address
+    : {};
+
   const pickFirst = (...values) => {
     for (const value of values) {
       if (typeof value === "string" && value.trim()) return value.trim();
@@ -28,11 +42,61 @@ function normalizeDbWorkplace(dbRow) {
   return {
     id: dbRow.id,
     name: dbRow.name,
-    address: pickFirst(dbRow.address, dbRow.street, dbRow.address_line_1, dbRow.full_address),
-    city: pickFirst(dbRow.city, dbRow.city_name, dbRow.town),
-    state: pickFirst(dbRow.state, dbRow.province, dbRow.region, dbRow.state_name),
-    postalCode: dbRow.postal_code || "",
-    country: pickFirst(dbRow.country, dbRow.country_name, dbRow.country_code),
+    address: pickFirst(
+      dbRow.address,
+      dbRow.street,
+      dbRow.address_line_1,
+      dbRow.address1,
+      dbRow.full_address,
+      crmAddress.line1,
+      crmAddress.street,
+      crmData.address
+    ),
+    city: pickFirst(
+      dbRow.city,
+      dbRow.city_name,
+      dbRow.cityname,
+      dbRow.town,
+      dbRow.municipality,
+      crmAddress.city,
+      crmAddress.town,
+      crmAddress.municipality,
+      crmData.city
+    ),
+    state: pickFirst(
+      dbRow.state,
+      dbRow.province,
+      dbRow.region,
+      dbRow.state_name,
+      dbRow.state_code,
+      dbRow.province_code,
+      crmAddress.state,
+      crmAddress.province,
+      crmAddress.region,
+      crmData.state,
+      crmData.province
+    ),
+    postalCode: pickFirst(
+      dbRow.postal_code,
+      dbRow.postcode,
+      dbRow.zip,
+      dbRow.zip_code,
+      crmAddress.postalCode,
+      crmAddress.postcode,
+      crmAddress.zip,
+      crmData.postalCode,
+      crmData.zip
+    ),
+    country: pickFirst(
+      dbRow.country,
+      dbRow.country_name,
+      dbRow.country_code,
+      dbRow.country_iso,
+      crmAddress.country,
+      crmAddress.countryCode,
+      crmData.country,
+      crmData.countryCode
+    ),
     timeZone: pickFirst(
       dbRow.time_zone,
       dbRow.timezone,
@@ -47,7 +111,7 @@ function normalizeDbWorkplace(dbRow) {
     longitude: dbRow.longitude || 0,
     geofenceRadiusMeters: dbRow.geofence_radius_meters || 150,
     active: dbRow.active !== false,
-    crm: (() => { try { return dbRow.crm ? (typeof dbRow.crm === "string" ? JSON.parse(dbRow.crm) : dbRow.crm) : {}; } catch { return {}; } })(),
+    crm: crmData,
     createdAt: dbRow.created_at,
     updatedAt: dbRow.updated_at,
   };
