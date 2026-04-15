@@ -35,10 +35,6 @@ app.get("/api/health", (req, res) => {
   res.type("text").send("TimeClock API running");
 });
 
-app.get("/", (req, res) => {
-  res.sendFile(path.join(clientDir, "index.html"));
-});
-
 app.post("/clock-in", (req, res) => {
   const { workerId, hotelName } = req.body || {};
 
