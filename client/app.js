@@ -8,8 +8,9 @@ const refreshLogsBtn = document.getElementById("refreshLogsBtn");
 const resultEl = document.getElementById("result");
 const logsEl = document.getElementById("logs");
 
-// v1: simple local dev default. Change later as needed.
-const API_BASE_URL = "http://localhost:3000";
+const API_BASE_URL = window.location.protocol.startsWith("http")
+  ? window.location.origin
+  : "http://localhost:3000";
 
 function setResult(objOrText) {
   if (typeof objOrText === "string") {

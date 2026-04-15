@@ -1,11 +1,17 @@
 import express from "express";
 import cors from "cors";
+import path from "path";
+import { fileURLToPath } from "url";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const clientDir = path.resolve(__dirname, "../client");
 
 app.use(cors());
 app.use(express.json());
+app.use(express.static(clientDir));
 
 // In-memory store (v1)
 const shiftsByWorker = new Map(); // workerId -> array of shift records
@@ -26,7 +32,7 @@ function findOpenShift(workerId) {
 }
 
 app.get("/", (req, res) => {
-  res.type("text").send("TimeClock API running");
+  res.sendFile(path.join(clientDir, "index.html"));
 });
 
 app.post("/clock-in", (req, res) => {
