@@ -3,458 +3,48 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Hotel Staff Time Clock</title>
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-    crossorigin=""
-  />
+  <title>Worker Time In / Time Out</title>
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
   <main class="container">
-    <h1>Hotel Staff Time Clock</h1>
+    <h1>Worker Time In / Time Out</h1>
 
-    <section id="loginView" class="card">
-      <div class="auth-switch">
-        <button id="showLoginBtn" type="button" class="ghost">Login</button>
-        <button id="showSignupBtn" type="button" class="ghost">Sign Up</button>
-      </div>
+    <section class="card">
+      <label>
+        Worker ID
+        <input id="workerId" type="text" placeholder="e.g. W123" autocomplete="off" />
+      </label>
 
-      <section id="loginFormView">
-      <h2>Sign In</h2>
-      <p id="loginHelpText" class="muted">Staff and admins use the same login with their Staff ID or email.</p>
       <label>
-        Staff ID or Email
-        <input id="identifier" type="text" placeholder="e.g. W1001 or maria@hotel.local" autocomplete="username" />
+        Hotel Name
+        <input id="hotelName" type="text" placeholder="e.g. Downtown Suites" autocomplete="off" />
       </label>
-      <label>
-        Password
-        <input id="password" type="password" placeholder="Enter password" autocomplete="current-password" />
-      </label>
-      <p id="loginError" class="error hidden"></p>
+
       <div class="actions">
-        <button id="loginBtn" type="button">Login</button>
+        <button id="timeInBtn" type="button">Time In</button>
+        <button id="timeOutBtn" type="button">Time Out</button>
       </div>
-      <div id="authDivider" class="auth-divider hidden">
-        <span>or</span>
-      </div>
-      <button id="googleLoginBtn" type="button" class="google-btn hidden">
-        <svg class="google-icon" viewBox="0 0 24 24">
-          <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-          <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-          <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-          <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-        </svg>
-        Login with Google
-      </button>
-      </section>
-
-      <section id="signupFormView" class="hidden">
-        <h2>Worker Sign Up</h2>
-        <p class="muted">Create your account to start clocking attendance.</p>
-        <label>
-          First Name
-          <input id="signupFirstName" type="text" placeholder="First name" autocomplete="given-name" />
-        </label>
-        <label>
-          Last Name
-          <input id="signupLastName" type="text" placeholder="Last name" autocomplete="family-name" />
-        </label>
-        <label>
-          Email
-          <input id="signupEmail" type="email" placeholder="name@company.com" autocomplete="email" />
-        </label>
-        <label>
-          Phone (optional)
-          <input id="signupPhone" type="tel" placeholder="e.g. +1 555 000 0000" autocomplete="tel" />
-        </label>
-        <label>
-          Password
-          <input id="signupPassword" type="password" placeholder="At least 8 characters" autocomplete="new-password" />
-        </label>
-        <label>
-          Confirm Password
-          <input id="signupConfirmPassword" type="password" placeholder="Re-enter password" autocomplete="new-password" />
-        </label>
-        <p id="signupError" class="error hidden"></p>
-        <div class="actions">
-          <button id="signupBtn" type="button">Create Account</button>
-        </div>
-      </section>
     </section>
 
-    <section id="appView" class="hidden">
-      <section class="card">
-        <div class="topbar">
-          <div>
-            <p class="muted">Welcome</p>
-            <h2 id="workerName">—</h2>
-          </div>
-          <button id="logoutBtn" type="button" class="ghost">Logout</button>
-        </div>
-        <div class="actions nav-actions">
-          <button id="showTimeClockBtn" type="button" class="ghost">Worker Time Clock</button>
-          <button id="showWorkplacesBtn" type="button" class="ghost hidden">Hotels / Workplaces</button>
-          <button id="showUsersBtn" type="button" class="ghost hidden">Staff Accounts</button>
-          <button id="showTimesheetsBtn" type="button" class="ghost hidden">Staff Timesheets</button>
-        </div>
-      </section>
+    <section class="card">
+      <h2>Status</h2>
+      <pre id="result" class="result">Ready.</pre>
+    </section>
 
-      <section id="timeClockSection" class="card">
-        <h2>Worker Time Clock</h2>
-        <p class="muted">Use the highlighted action to continue your shift.</p>
-        <p id="liveClock" class="clock">—</p>
-        <p class="status-line">
-          Current status:
-          <span id="statusBadge" class="badge">Not clocked in</span>
-        </p>
-        <p id="workerStatusText" class="workflow-status">Ready to clock in.</p>
-        <p id="assignedWorkplaceInfo" class="muted">Assigned workplace: none</p>
-        <p id="geofenceInfo" class="muted">Distance check: not evaluated yet</p>
-        <label>
-          Optional notes
-          <input id="notes" type="text" placeholder="Add notes for this action" maxlength="500" />
-        </label>
-
-        <section id="locationPanel" class="location-panel" aria-live="polite">
-          <div class="topbar compact">
-            <h3>Location</h3>
-            <button id="refreshLocationBtn" type="button" class="ghost small">Retry / Refresh Location</button>
-          </div>
-          <p class="status-line">
-            Current location status:
-            <span id="locationStatusBadge" class="badge">Location unavailable</span>
-          </p>
-          <p id="locationMessage" class="location-message">Open this screen to request a fresh phone location.</p>
-          <p id="locationCoordinates" class="muted">Coordinates: —</p>
-          <div id="locationHelpPanel" class="location-guidance hidden">
-            <strong>Location access is required</strong>
-            <p>Turn on Location Services on your phone, allow Safari or Chrome to use location for this site, then reopen the page and tap Retry / Refresh Location.</p>
-          </div>
-          <details class="location-technical">
-            <summary>Show technical location details</summary>
-            <p id="locationDebug" class="location-debug muted">Permission: checking</p>
-          </details>
-          <div class="last-location">
-            <p class="muted">Last captured location</p>
-            <p id="lastLocationDetails" class="location-details">No location captured yet.</p>
-          </div>
-          <div class="map-panel">
-            <div class="topbar compact">
-              <h3>Map Preview</h3>
-              <p id="mapStatusText" class="muted map-status">Waiting for location</p>
-            </div>
-            <div id="locationMap" class="location-map hidden" aria-label="Captured location map"></div>
-            <div id="mapPlaceholder" class="map-placeholder">Location not captured yet.</div>
-            <p id="mapCoordinatesText" class="muted">Map coordinates: —</p>
-          </div>
-        </section>
-
-        <p id="actionError" class="error hidden"></p>
-        <p id="actionFeedback" class="action-feedback hidden"></p>
-        <div class="actions">
-          <button id="clockInBtn" type="button">Clock In</button>
-          <button id="startBreakBtn" type="button">Start Break</button>
-          <button id="endBreakBtn" type="button">End Break</button>
-          <button id="clockOutBtn" type="button">Clock Out</button>
-        </div>
-        <p id="locationActionHint" class="location-action-hint muted">Clock In stays disabled until a fresh location is captured.</p>
-      </section>
-
-      <section id="historySection" class="card">
-        <div class="topbar">
-          <h2>Attendance History</h2>
-          <button id="refreshHistoryBtn" type="button" class="ghost">Refresh</button>
-        </div>
-        <p class="muted">Recent shifts by hotel business date, with key times and workplace.</p>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Business Date</th>
-                <th>Workplace</th>
-                <th>Clock In</th>
-                <th>Break</th>
-                <th>Clock Out</th>
-                <th>Total Hours</th>
-              </tr>
-            </thead>
-            <tbody id="historyBody">
-              <tr>
-                <td colspan="6" class="muted">No attendance history yet.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section id="workplacesSection" class="card hidden">
-        <div class="topbar">
-          <h2>Hotels / Workplaces</h2>
-          <button id="refreshWorkplacesBtn" type="button" class="ghost">Refresh</button>
-        </div>
-        <p class="muted">
-          Shared workplaces come from CRM and are read-only here. Use this screen to review locations and assign workers.
-        </p>
-        <form id="workplaceForm" class="workplace-form hidden">
-          <input id="workplaceId" type="hidden" />
-          <label>Workplace Name<input id="wpName" type="text" /></label>
-          <label>Address<input id="wpAddress" type="text" /></label>
-          <label>City<input id="wpCity" type="text" /></label>
-          <label>Province / State<input id="wpState" type="text" /></label>
-          <label>Postal Code<input id="wpPostalCode" type="text" /></label>
-          <label>Country<input id="wpCountry" type="text" /></label>
-          <label>Contact Person<input id="wpContactName" type="text" /></label>
-          <label>Contact Phone<input id="wpContactPhone" type="text" /></label>
-          <label>Contact Email<input id="wpContactEmail" type="email" /></label>
-          <label>Latitude<input id="wpLatitude" type="number" step="any" /></label>
-          <label>Longitude<input id="wpLongitude" type="number" step="any" /></label>
-          <label>Geofence Radius (m)<input id="wpRadius" type="number" step="1" min="10" /></label>
-          <label class="checkbox-inline"><input id="wpActive" type="checkbox" checked /> Active</label>
-          <p id="workplaceError" class="error hidden"></p>
-          <div class="actions">
-            <button id="saveWorkplaceBtn" type="submit">Save Workplace</button>
-            <button id="resetWorkplaceBtn" type="button" class="ghost">Clear</button>
-          </div>
-        </form>
-
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Location</th>
-                <th>Coordinates</th>
-                <th>Radius</th>
-                <th>Status</th>
-                <th>Assignments</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="workplacesBody">
-              <tr><td colspan="7" class="muted">No workplaces yet.</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <section class="assignment-section">
-          <h3>Worker Workplace Assignment</h3>
-          <p class="muted">Assign each worker to one active workplace for geofencing checks.</p>
-          <div class="assignment-controls">
-            <label>
-              Worker
-              <select id="assignWorkerSelect"></select>
-            </label>
-            <label>
-              Workplace
-              <select id="assignWorkplaceSelect"></select>
-            </label>
-            <button id="saveAssignmentBtn" type="button">Save Assignment</button>
-          </div>
-          <p id="assignmentError" class="error hidden"></p>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Worker</th>
-                  <th>Email</th>
-                  <th>Assigned Workplace</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody id="workerAssignmentsBody">
-                <tr><td colspan="4" class="muted">No workers available.</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </section>
-
-      <section id="timesheetsSection" class="card hidden">
-        <div class="topbar">
-          <h2>Staff Timesheets</h2>
-          <div class="topbar-actions">
-            <button id="createPayrollExportBtn" type="button">Create Payroll Export</button>
-            <button id="exportTimesheetsCsvBtn" type="button" class="ghost">Export CSV</button>
-            <button id="refreshTimesheetsBtn" type="button" class="ghost">Refresh</button>
-          </div>
-        </div>
-        <p class="muted">Track worker hours by hotel business date, resolve issues, approve payroll, and create immutable export batches.</p>
-        <div class="filter-panel">
-          <label>Date From<input id="tsDateFrom" type="date" /></label>
-          <label>Date To<input id="tsDateTo" type="date" /></label>
-          <label>Pay Period
-            <select id="tsPayPeriodFilter">
-              <option value="">All pay periods</option>
-            </select>
-          </label>
-          <label>Search Worker<input id="tsSearch" type="text" placeholder="Name, email or staff ID" /></label>
-          <label>Workplace
-            <select id="tsWorkplaceFilter">
-              <option value="">All workplaces</option>
-            </select>
-          </label>
-          <label>Status
-            <select id="tsStatusFilter">
-              <option value="">All statuses</option>
-              <option value="open_shift">Open shift</option>
-              <option value="completed">Completed</option>
-              <option value="missing_break_end">Missing break end</option>
-              <option value="no_location">No location</option>
-              <option value="outside_geofence">Outside workplace area</option>
-              <option value="workplace_unresolved">Workplace unresolved</option>
-              <option value="pending_review">Pending review</option>
-              <option value="reviewed">Reviewed</option>
-              <option value="follow_up_required">Follow-up required</option>
-              <option value="low_accuracy">Low accuracy (&gt;50 m)</option>
-            </select>
-          </label>
-          <label>Payroll
-            <select id="tsPayrollFilter">
-              <option value="">All payroll states</option>
-              <option value="pending">Pending</option>
-              <option value="approved">Approved</option>
-              <option value="exported">Exported</option>
-            </select>
-          </label>
-          <div class="filter-actions">
-            <button id="applyTimesheetFiltersBtn" type="button">Apply Filters</button>
-            <button id="clearTimesheetFiltersBtn" type="button" class="ghost">Clear</button>
-          </div>
-        </div>
-        <section class="pay-periods-panel">
-          <div class="topbar">
-            <h3>Pay Periods</h3>
-          </div>
-          <p class="muted">Create pay periods, filter payroll work by period, and lock a period once every payroll-ready shift in it has been exported.</p>
-          <form id="createPayPeriodForm" class="filter-panel compact-panel">
-            <label>Label<input name="label" type="text" maxlength="120" placeholder="2026-04-01 to 2026-04-14" /></label>
-            <label>Start Date<input name="startDate" type="date" required /></label>
-            <label>End Date<input name="endDate" type="date" required /></label>
-            <div class="filter-actions">
-              <button type="submit">Create Pay Period</button>
-            </div>
-          </form>
-          <p id="payPeriodActionMessage" class="action-feedback hidden"></p>
-          <div id="payPeriodsList" class="pay-periods-list">
-            <p class="muted">No pay periods yet.</p>
-          </div>
-        </section>
-        <div id="timesheetSummaryCards" class="timesheet-summary-grid"></div>
-        <section class="payroll-exports-panel">
-          <div class="topbar">
-            <h3>Recent Payroll Exports</h3>
-          </div>
-          <div id="payrollExportsList" class="payroll-exports-list">
-            <p class="muted">No payroll export batches yet.</p>
-          </div>
-
-          <div id="payrollExportDetailPanel" class="detail-panel hidden">
-            <div class="topbar">
-              <h3>Payroll Export Detail</h3>
-              <button id="closePayrollExportDetailBtn" type="button" class="ghost">✕ Close</button>
-            </div>
-            <p id="payrollExportActionMessage" class="action-feedback hidden"></p>
-            <div id="payrollExportDetailContent" class="detail-content"></div>
-          </div>
-        </section>
-        <p id="timesheetError" class="error hidden"></p>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Worker</th>
-                <th>Business Date</th>
-                <th>Workplace</th>
-                <th>Clock In</th>
-                <th>Clock Out</th>
-                <th>Total Hours</th>
-                <th>Status</th>
-                <th>Payroll</th>
-                <th>Attention</th>
-                <th>Notes</th>
-              </tr>
-            </thead>
-            <tbody id="timesheetsBody">
-              <tr><td colspan="10" class="muted">No timesheets loaded.</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <div id="timesheetsPagination" class="pagination-bar"></div>
-
-        <div id="timesheetDetailPanel" class="detail-panel hidden">
-          <div class="topbar">
-            <h3>Shift Detail</h3>
-            <button id="closeTimesheetDetailBtn" type="button" class="ghost">✕ Close</button>
-          </div>
-          <p id="timesheetActionMessage" class="action-feedback hidden"></p>
-          <div id="timesheetDetailContent" class="detail-content"></div>
-        </div>
-      </section>
-
-      <section id="usersSection" class="card hidden">
-        <div class="topbar">
-          <h2>Staff Accounts</h2>
-          <button id="refreshUsersBtn" type="button" class="ghost">Refresh</button>
-        </div>
-        <p class="muted">Create staff accounts and manage who can access the app.</p>
-
-        <form id="adminUserForm" class="workplace-form">
-          <label>First Name<input id="adminUserFirstName" type="text" required /></label>
-          <label>Last Name<input id="adminUserLastName" type="text" required /></label>
-          <label>Email<input id="adminUserEmail" type="email" required /></label>
-          <label>Staff ID<input id="adminUserStaffId" type="text" required /></label>
-          <label>Password<input id="adminUserPassword" type="password" minlength="8" required /></label>
-          <label>Confirm Password<input id="adminUserConfirmPassword" type="password" minlength="8" required /></label>
-          <label>
-            Role
-            <select id="adminUserRole">
-              <option value="worker">Worker</option>
-              <option value="admin">Admin</option>
-            </select>
-          </label>
-
-          <p id="adminUserMessage" class="muted"></p>
-          <p id="adminUserError" class="error hidden"></p>
-
-          <div class="actions">
-            <button id="createAdminUserBtn" type="submit">Create User</button>
-          </div>
-        </form>
-
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Staff ID</th>
-                <th>Role</th>
-                <th>Created</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="adminUsersBody">
-              <tr><td colspan="7" class="muted">No users available.</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
+    <section class="card">
+      <h2>Logs</h2>
+      <div class="actions">
+        <button id="refreshLogsBtn" type="button">Refresh Logs</button>
+      </div>
+      <pre id="logs" class="result">(none)</pre>
     </section>
 
     <footer class="footer">
-      <small>Configured instance for staff attendance and admin operations.</small>
+      <small>Backend default: http://localhost:3000</small>
     </footer>
   </main>
-  <script
-    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-    crossorigin=""
-  ></script>
+
   <script src="./app.js"></script>
 </body>
 </html>
