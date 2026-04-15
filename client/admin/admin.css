@@ -99,6 +99,20 @@ body {
 }
 .btn-nav-logout:hover { color: var(--danger); border-color: var(--danger); }
 
+.btn-nav-login {
+  padding: 7px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--primary);
+  font-size: 0.88rem;
+  font-weight: 600;
+  text-decoration: none;
+  margin-left: 8px;
+  white-space: nowrap;
+}
+.btn-nav-login:hover { color: var(--text); border-color: var(--primary); background: rgba(91, 146, 255, 0.08); }
+
 /* ── Main content ────────────────────────────────────────────────────────── */
 .main {
   max-width: 1200px;

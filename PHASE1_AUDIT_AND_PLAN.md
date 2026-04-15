@@ -70,6 +70,15 @@ Repository: TITO (Hotel Staff Time Clock)
   - Hotel hours summary
 - Wire reports UI to dedicated endpoints.
 
+### Commit 6 - Admin View Navigation Simplification
+- Replace admin tab-style semantics with clearer view-style navigation.
+- Add URL query-backed view routing (`?view=`) with browser back/forward support.
+- Preserve lazy module initialization and section state while navigating.
+
+### Commit 7 - Login Access Clarity Hardening
+- Add explicit `Login Page` shortcut controls in admin and worker headers.
+- Reduce user confusion when landing on shell routes by providing immediate path back to root sign-in.
+
 ## Risk Notes
 - Current worktree already includes a restoration of production entrypoint files after a prior regression merge; those changes remain staged as baseline and should be reviewed together with phase commits.
 - Runtime verification requires Node/npm environment; static diagnostics pass in-editor.
