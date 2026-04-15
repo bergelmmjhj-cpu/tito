@@ -15,7 +15,11 @@ import {
   createPayrollPeriodController,
   createPayrollExportBatchController,
   downloadPayrollExportBatchCsvController,
+  exportDailyAttendanceCsvController,
+  exportHotelHoursSummaryCsvController,
+  exportPayrollCutoffCsvController,
   exportTimesheetsCsvController,
+  exportWorkerHoursSummaryCsvController,
   getPayrollPeriodDetailController,
   getPayrollExportBatchDetailController,
   getTimesheetDetailController,
@@ -76,6 +80,11 @@ export function createAdminRoutes() {
   router.get("/payroll-exports/:batchId/csv", downloadPayrollExportBatchCsvController);
   router.post("/payroll-exports/:batchId/reopen", reopenPayrollExportBatchController);
   router.post("/payroll-exports/:batchId/reissue", reissuePayrollExportBatchController);
+
+  router.get("/reports/daily-attendance.csv", exportDailyAttendanceCsvController);
+  router.get("/reports/payroll-cutoff.csv", exportPayrollCutoffCsvController);
+  router.get("/reports/worker-hours.csv", exportWorkerHoursSummaryCsvController);
+  router.get("/reports/hotel-hours.csv", exportHotelHoursSummaryCsvController);
 
   // Timesheets — export must be registered before the :shiftId param route
   router.get("/timesheets/export/csv", exportTimesheetsCsvController);

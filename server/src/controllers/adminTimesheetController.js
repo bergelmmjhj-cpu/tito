@@ -1,6 +1,10 @@
 import {
+  buildDailyAttendanceCsv,
+  buildHotelHoursSummaryCsv,
+  buildPayrollCutoffCsv,
   createAdminPayrollPeriod,
   createAdminPayrollExportBatch,
+  buildWorkerHoursSummaryCsv,
   buildTimesheetsCsv,
   getAdminPayrollPeriodDetail,
   getAdminPayrollExportBatchDetail,
@@ -83,6 +87,90 @@ export async function exportTimesheetsCsvController(req, res) {
     res.send(csv);
   } catch (error) {
     console.error("[admin.timesheets.csv] failed", {
+      adminUserId: req.user?.id || null,
+      query: req.query || {},
+      message: error?.message || "unknown_error",
+      name: error?.name || "Error",
+      stack: error?.stack || "no_stack",
+    });
+    const err = toHttpError(error);
+    res.status(err.status).json({ error: err.message });
+  }
+}
+
+export async function exportDailyAttendanceCsvController(req, res) {
+  try {
+    const filters = parseTimesheetFilters(req.query);
+    const csv = await buildDailyAttendanceCsv(filters);
+    const date = new Date().toISOString().slice(0, 10);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="daily-attendance-${date}.csv"`);
+    res.send(csv);
+  } catch (error) {
+    console.error("[admin.reports.daily-attendance] failed", {
+      adminUserId: req.user?.id || null,
+      query: req.query || {},
+      message: error?.message || "unknown_error",
+      name: error?.name || "Error",
+      stack: error?.stack || "no_stack",
+    });
+    const err = toHttpError(error);
+    res.status(err.status).json({ error: err.message });
+  }
+}
+
+export async function exportPayrollCutoffCsvController(req, res) {
+  try {
+    const filters = parseTimesheetFilters(req.query);
+    const csv = await buildPayrollCutoffCsv(filters);
+    const date = new Date().toISOString().slice(0, 10);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="payroll-cutoff-${date}.csv"`);
+    res.send(csv);
+  } catch (error) {
+    console.error("[admin.reports.payroll-cutoff] failed", {
+      adminUserId: req.user?.id || null,
+      query: req.query || {},
+      message: error?.message || "unknown_error",
+      name: error?.name || "Error",
+      stack: error?.stack || "no_stack",
+    });
+    const err = toHttpError(error);
+    res.status(err.status).json({ error: err.message });
+  }
+}
+
+export async function exportWorkerHoursSummaryCsvController(req, res) {
+  try {
+    const filters = parseTimesheetFilters(req.query);
+    const csv = await buildWorkerHoursSummaryCsv(filters);
+    const date = new Date().toISOString().slice(0, 10);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="worker-hours-${date}.csv"`);
+    res.send(csv);
+  } catch (error) {
+    console.error("[admin.reports.worker-hours] failed", {
+      adminUserId: req.user?.id || null,
+      query: req.query || {},
+      message: error?.message || "unknown_error",
+      name: error?.name || "Error",
+      stack: error?.stack || "no_stack",
+    });
+    const err = toHttpError(error);
+    res.status(err.status).json({ error: err.message });
+  }
+}
+
+export async function exportHotelHoursSummaryCsvController(req, res) {
+  try {
+    const filters = parseTimesheetFilters(req.query);
+    const csv = await buildHotelHoursSummaryCsv(filters);
+    const date = new Date().toISOString().slice(0, 10);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="hotel-hours-${date}.csv"`);
+    res.send(csv);
+  } catch (error) {
+    console.error("[admin.reports.hotel-hours] failed", {
       adminUserId: req.user?.id || null,
       query: req.query || {},
       message: error?.message || "unknown_error",

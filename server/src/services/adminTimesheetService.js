@@ -27,6 +27,8 @@ import { HttpError } from "../utils/errors.js";
 import { formatBusinessDate, resolveBusinessTimeZone } from "../utils/time.js";
 
 const LOW_ACCURACY_THRESHOLD_METERS = 50;
+const SUSPICIOUS_SHORT_SHIFT_HOURS = 1;
+const OVERLONG_SHIFT_HOURS = 16;
 const DEFAULT_PAGE_LIMIT = 50;
 const MAX_PAGE_LIMIT = 200;
 const REVIEW_STATUSES = new Set(["reviewed", "follow_up_required"]);
@@ -139,6 +141,8 @@ function buildTimesheetRow(shift, user, shiftLogs, workplaceIndex, userIndex = {
   const status = deriveShiftStatus(shift);
   const finalActualHours = typeof shift?.actualHours === "number" ? shift.actualHours : summary.actualHours;
   const finalPayableHours = typeof shift?.payableHours === "number" ? shift.payableHours : summary.payableHours;
+  const suspiciousShortShift = typeof finalActualHours === "number" && finalActualHours > 0 && finalActualHours < SUSPICIOUS_SHORT_SHIFT_HOURS;
+  const overlongShift = typeof finalActualHours === "number" && finalActualHours > OVERLONG_SHIFT_HOURS;
   const payableHoursAdjusted =
     summary.payableHours !== null &&
     typeof finalPayableHours === "number" &&
@@ -148,6 +152,8 @@ function buildTimesheetRow(shift, user, shiftLogs, workplaceIndex, userIndex = {
     lowAccuracy ||
     outsideGeofence ||
     unresolvedWorkplace ||
+    suspiciousShortShift ||
+    overlongShift ||
     status === "open_shift" ||
     status === "missing_break_end";
   const reviewStatus = shift?.reviewStatus || null;
@@ -207,6 +213,10 @@ function buildTimesheetRow(shift, user, shiftLogs, workplaceIndex, userIndex = {
     locationAccuracy: typeof clockInLocation?.accuracy === "number" ? clockInLocation.accuracy : null,
     noLocation,
     lowAccuracy,
+    suspiciousShortShift,
+    overlongShift,
+    duplicateShift: false,
+    hasException,
     hasActiveBreak: hasActiveBreak(shift),
     reviewStatus,
     reviewPending,
@@ -250,6 +260,9 @@ function matchesStatus(row, status) {
   if (status === "low_accuracy") return row.lowAccuracy;
   if (status === "outside_geofence") return row.outsideGeofence;
   if (status === "workplace_unresolved") return row.unresolvedWorkplace;
+  if (status === "duplicate_shift") return row.duplicateShift;
+  if (status === "suspicious_short_shift") return row.suspiciousShortShift;
+  if (status === "over_16_hours") return row.overlongShift;
   if (status === "pending_review") return row.reviewPending;
   if (status === "reviewed") return row.reviewStatus === "reviewed";
   if (status === "follow_up_required") return row.reviewStatus === "follow_up_required";
@@ -468,6 +481,23 @@ async function getFilteredTimesheetRows(filters) {
     )
   );
 
+  // Mark potential duplicate shifts: same worker with multiple shifts on the same business date.
+  const duplicateGroups = rows.reduce((map, row) => {
+    const key = `${row.workerId || ""}|${row.date || ""}`;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(row);
+    return map;
+  }, new Map());
+
+  for (const groupedRows of duplicateGroups.values()) {
+    if (groupedRows.length <= 1) continue;
+    for (const row of groupedRows) {
+      row.duplicateShift = true;
+      row.hasException = true;
+      if (!row.reviewFlag) row.reviewFlag = "duplicate_shift";
+    }
+  }
+
   return rows.filter((row) => {
     if (filters.payPeriodId && row.payPeriodId !== filters.payPeriodId) return false;
     if (filters.workerId && row.workerId !== filters.workerId) return false;
@@ -522,6 +552,9 @@ export function parseTimesheetFilters(query) {
     "low_accuracy",
     "outside_geofence",
     "workplace_unresolved",
+    "duplicate_shift",
+    "suspicious_short_shift",
+    "over_16_hours",
     "pending_review",
     "reviewed",
     "follow_up_required",
@@ -1029,6 +1062,9 @@ const CSV_COLUMNS = [
   { header: "Location Accuracy (m)", key: "locationAccuracy" },
   { header: "No Location", key: "noLocation" },
   { header: "Low Accuracy", key: "lowAccuracy" },
+  { header: "Suspicious Short Shift", key: "suspiciousShortShift" },
+  { header: "Over 16 Hours", key: "overlongShift" },
+  { header: "Duplicate Shift", key: "duplicateShift" },
   { header: "Review Status", key: "reviewStatus" },
   { header: "Review Pending", key: "reviewPending" },
   { header: "Review Note", key: "reviewNote" },
@@ -1064,4 +1100,200 @@ export async function buildTimesheetsCsv(filters) {
   });
 
   return buildCsvFromRows(timesheets);
+}
+
+function toSafeNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function buildWorkerHoursSummaryRows(timesheets) {
+  const byWorker = new Map();
+
+  for (const row of timesheets || []) {
+    const key = row.workerId || row.workerEmail || row.workerName || "unknown";
+    if (!byWorker.has(key)) {
+      byWorker.set(key, {
+        workerId: row.workerId || "",
+        workerName: row.workerName || "Unknown",
+        workerStaffId: row.workerStaffId || "",
+        workerEmail: row.workerEmail || "",
+        shiftCount: 0,
+        actualHours: 0,
+        payableHours: 0,
+        openShiftCount: 0,
+        exceptionShiftCount: 0,
+      });
+    }
+
+    const agg = byWorker.get(key);
+    agg.shiftCount += 1;
+    agg.actualHours += toSafeNumber(row.actualHours);
+    agg.payableHours += toSafeNumber(row.payableHours);
+    if (row.status === "open_shift") agg.openShiftCount += 1;
+    if (row.hasException || row.reviewPending) agg.exceptionShiftCount += 1;
+  }
+
+  return Array.from(byWorker.values())
+    .map((row) => ({
+      ...row,
+      actualHours: Number(row.actualHours.toFixed(2)),
+      payableHours: Number(row.payableHours.toFixed(2)),
+    }))
+    .sort((a, b) => a.workerName.localeCompare(b.workerName));
+}
+
+function buildHotelHoursSummaryRows(timesheets) {
+  const byHotel = new Map();
+
+  for (const row of timesheets || []) {
+    const key = row.workplaceId || row.workplaceName || "unresolved";
+    if (!byHotel.has(key)) {
+      byHotel.set(key, {
+        workplaceId: row.workplaceId || "",
+        workplaceName: row.workplaceName || "Workplace unresolved",
+        shiftCount: 0,
+        actualHours: 0,
+        payableHours: 0,
+        openShiftCount: 0,
+        exceptionShiftCount: 0,
+      });
+    }
+
+    const agg = byHotel.get(key);
+    agg.shiftCount += 1;
+    agg.actualHours += toSafeNumber(row.actualHours);
+    agg.payableHours += toSafeNumber(row.payableHours);
+    if (row.status === "open_shift") agg.openShiftCount += 1;
+    if (row.hasException || row.reviewPending) agg.exceptionShiftCount += 1;
+  }
+
+  return Array.from(byHotel.values())
+    .map((row) => ({
+      ...row,
+      actualHours: Number(row.actualHours.toFixed(2)),
+      payableHours: Number(row.payableHours.toFixed(2)),
+    }))
+    .sort((a, b) => a.workplaceName.localeCompare(b.workplaceName));
+}
+
+function buildDailyAttendanceRows(timesheets) {
+  return (timesheets || [])
+    .map((row) => ({
+      date: row.date || "",
+      workerName: row.workerName || "",
+      workerStaffId: row.workerStaffId || "",
+      workplaceName: row.workplaceName || "",
+      clockInAt: row.clockInAt || "",
+      clockOutAt: row.clockOutAt || "",
+      status: row.status || "",
+      actualHours: toSafeNumber(row.actualHours).toFixed(2),
+      payableHours: toSafeNumber(row.payableHours).toFixed(2),
+      reviewStatus: row.reviewStatus || "",
+      payrollStatus: row.payrollStatus || "",
+      reviewFlag: row.reviewFlag || "",
+    }))
+    .sort((a, b) => {
+      const dateCmp = a.date.localeCompare(b.date);
+      if (dateCmp !== 0) return dateCmp;
+      return a.workerName.localeCompare(b.workerName);
+    });
+}
+
+function buildPayrollCutoffRows(timesheets) {
+  return (timesheets || [])
+    .filter((row) => row.payrollStatus === "approved" || row.payrollStatus === "exported")
+    .map((row) => ({
+      payPeriod: row.payPeriodLabel || "",
+      businessDate: row.date || "",
+      workerName: row.workerName || "",
+      workerStaffId: row.workerStaffId || "",
+      workplaceName: row.workplaceName || "",
+      payableHours: toSafeNumber(row.payableHours).toFixed(2),
+      payrollStatus: row.payrollStatus || "",
+      reviewStatus: row.reviewStatus || "",
+      payrollApprovedAt: row.payrollApprovedAt || "",
+      payrollApprovedBy: row.payrollApprovedByName || "",
+      payrollExportedAt: row.payrollExportedAt || "",
+      payrollExportedBy: row.payrollExportedByName || "",
+    }))
+    .sort((a, b) => {
+      const periodCmp = a.payPeriod.localeCompare(b.payPeriod);
+      if (periodCmp !== 0) return periodCmp;
+      const dateCmp = a.businessDate.localeCompare(b.businessDate);
+      if (dateCmp !== 0) return dateCmp;
+      return a.workerName.localeCompare(b.workerName);
+    });
+}
+
+function buildCsvFromHeaders(rows, headers) {
+  const headerLine = headers.map((h) => escapeCsvCell(h.header)).join(",");
+  const bodyLines = (rows || []).map((row) => headers.map((h) => escapeCsvCell(row[h.key])).join(","));
+  return [headerLine, ...bodyLines].join("\r\n");
+}
+
+export async function buildDailyAttendanceCsv(filters) {
+  const rows = await getFilteredTimesheetRows({ ...filters, page: 1, limit: MAX_PAGE_LIMIT * 100 });
+  const shaped = buildDailyAttendanceRows(rows);
+  return buildCsvFromHeaders(shaped, [
+    { header: "Business Date", key: "date" },
+    { header: "Worker Name", key: "workerName" },
+    { header: "Staff ID", key: "workerStaffId" },
+    { header: "Hotel", key: "workplaceName" },
+    { header: "Clock In", key: "clockInAt" },
+    { header: "Clock Out", key: "clockOutAt" },
+    { header: "Status", key: "status" },
+    { header: "Actual Hours", key: "actualHours" },
+    { header: "Payable Hours", key: "payableHours" },
+    { header: "Review Status", key: "reviewStatus" },
+    { header: "Payroll Status", key: "payrollStatus" },
+    { header: "Review Flag", key: "reviewFlag" },
+  ]);
+}
+
+export async function buildWorkerHoursSummaryCsv(filters) {
+  const rows = await getFilteredTimesheetRows({ ...filters, page: 1, limit: MAX_PAGE_LIMIT * 100 });
+  const shaped = buildWorkerHoursSummaryRows(rows);
+  return buildCsvFromHeaders(shaped, [
+    { header: "Worker Name", key: "workerName" },
+    { header: "Staff ID", key: "workerStaffId" },
+    { header: "Email", key: "workerEmail" },
+    { header: "Shift Count", key: "shiftCount" },
+    { header: "Open Shifts", key: "openShiftCount" },
+    { header: "Shifts Needing Review", key: "exceptionShiftCount" },
+    { header: "Actual Hours", key: "actualHours" },
+    { header: "Payable Hours", key: "payableHours" },
+  ]);
+}
+
+export async function buildHotelHoursSummaryCsv(filters) {
+  const rows = await getFilteredTimesheetRows({ ...filters, page: 1, limit: MAX_PAGE_LIMIT * 100 });
+  const shaped = buildHotelHoursSummaryRows(rows);
+  return buildCsvFromHeaders(shaped, [
+    { header: "Hotel", key: "workplaceName" },
+    { header: "Workplace ID", key: "workplaceId" },
+    { header: "Shift Count", key: "shiftCount" },
+    { header: "Open Shifts", key: "openShiftCount" },
+    { header: "Shifts Needing Review", key: "exceptionShiftCount" },
+    { header: "Actual Hours", key: "actualHours" },
+    { header: "Payable Hours", key: "payableHours" },
+  ]);
+}
+
+export async function buildPayrollCutoffCsv(filters) {
+  const rows = await getFilteredTimesheetRows({ ...filters, page: 1, limit: MAX_PAGE_LIMIT * 100 });
+  const shaped = buildPayrollCutoffRows(rows);
+  return buildCsvFromHeaders(shaped, [
+    { header: "Pay Period", key: "payPeriod" },
+    { header: "Business Date", key: "businessDate" },
+    { header: "Worker Name", key: "workerName" },
+    { header: "Staff ID", key: "workerStaffId" },
+    { header: "Hotel", key: "workplaceName" },
+    { header: "Payable Hours", key: "payableHours" },
+    { header: "Payroll Status", key: "payrollStatus" },
+    { header: "Review Status", key: "reviewStatus" },
+    { header: "Payroll Approved At", key: "payrollApprovedAt" },
+    { header: "Payroll Approved By", key: "payrollApprovedBy" },
+    { header: "Payroll Exported At", key: "payrollExportedAt" },
+    { header: "Payroll Exported By", key: "payrollExportedBy" },
+  ]);
 }

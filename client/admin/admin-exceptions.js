@@ -6,6 +6,9 @@ let exPage    = 1;
 const EXCEPTION_STATUSES = [
   { value: "open_shift",       label: "Missing Clock Out" },
   { value: "missing_break_end",label: "Missing Break End" },
+  { value: "duplicate_shift",  label: "Duplicate Shift" },
+  { value: "suspicious_short_shift", label: "Suspicious Short Shift" },
+  { value: "over_16_hours",    label: "Over 16 Hours" },
   { value: "outside_geofence", label: "Outside Hotel Area" },
   { value: "no_location",      label: "No Location Recorded" },
   { value: "workplace_unresolved", label: "Hotel Undetected" },
@@ -33,6 +36,9 @@ function exBuildQs(filters, page) {
 }
 
 function exStatusLabel(ts) {
+  if (ts.duplicateShift)                 return `<span class="badge badge-review">Duplicate Shift</span>`;
+  if (ts.suspiciousShortShift)           return `<span class="badge badge-review">Suspicious Short Shift</span>`;
+  if (ts.overlongShift)                  return `<span class="badge badge-review">Over 16 Hours</span>`;
   if (ts.status === "open_shift")        return `<span class="badge badge-open">Missing Clock Out</span>`;
   if (ts.status === "missing_break_end") return `<span class="badge badge-review">Missing Break End</span>`;
   if (ts.outsideGeofence)                return `<span class="badge badge-review">Outside Hotel Area</span>`;
@@ -61,6 +67,9 @@ async function loadExceptions(filters, page) {
       ts.reviewPending ||
       ts.status === "open_shift" ||
       ts.status === "missing_break_end" ||
+      ts.duplicateShift ||
+      ts.suspiciousShortShift ||
+      ts.overlongShift ||
       ts.outsideGeofence ||
       ts.unresolvedWorkplace ||
       ts.noLocation
@@ -169,8 +178,8 @@ function renderExDetail(ts, contentEl) {
       <div class="form-grid-2">
         <label>Action
           <select name="reviewStatus">
-            <option value="reviewed">Approve — All clear</option>
-            <option value="follow_up_required">Flag for follow-up</option>
+            <option value="reviewed">Approve Shift</option>
+            <option value="follow_up_required">Reject (Needs Follow-up)</option>
           </select>
         </label>
         <label>Payroll
@@ -180,13 +189,16 @@ function renderExDetail(ts, contentEl) {
           </select>
         </label>
       </div>
+      <label>Fix Payable Hours (optional)
+        <input name="payableHours" type="number" step="0.25" min="0" max="48" placeholder="Example: 7.50" />
+      </label>
       ${closingFields}
       ${breakField}
       <label>Manager Note (required)
         <textarea name="reviewNote" required maxlength="1000" placeholder="Describe what you reviewed or changed."></textarea>
       </label>
       <div class="form-actions">
-        <button type="submit" class="btn">Save &amp; Close Exception</button>
+        <button type="submit" class="btn">Save Decision</button>
       </div>
     </form>`;
 
@@ -205,6 +217,7 @@ async function submitExResolution(event) {
     reviewStatus:  fd.get("reviewStatus") || undefined,
     payrollStatus: fd.get("payrollStatus") || undefined,
     reviewNote:    fd.get("reviewNote")    || undefined,
+    payableHours:  fd.get("payableHours")  || undefined,
   };
   if (fd.get("closeOpenShift")   === "on") payload.closeOpenShiftAt   = fd.get("closeOpenShiftAt")  || null;
   if (fd.get("closeActiveBreak") === "on") payload.closeActiveBreakAt = fd.get("closeActiveBreakAt")|| null;
