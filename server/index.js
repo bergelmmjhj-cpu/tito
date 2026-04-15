@@ -1,8 +1,13 @@
 import express from "express";
 import cors from "cors";
+import path from "path";
+import { fileURLToPath } from "url";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const clientDir = path.resolve(__dirname, "../client");
 
 app.use(cors());
 app.use(express.json());
@@ -25,7 +30,7 @@ function findOpenShift(workerId) {
   return logs.find((s) => !s.clockOutAt) || null;
 }
 
-app.get("/", (req, res) => {
+app.get("/api/health", (req, res) => {
   res.type("text").send("TimeClock API running");
 });
 
@@ -92,6 +97,8 @@ app.get("/logs/:workerId", (req, res) => {
   const logs = getWorkerLogs(wid);
   res.json(logs);
 });
+
+app.use(express.static(clientDir));
 
 app.listen(PORT, () => {
   console.log(`TimeClock API listening on http://localhost:${PORT}`);
