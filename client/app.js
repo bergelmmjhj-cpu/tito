@@ -29,9 +29,10 @@ function redirectForUser(user) {
 }
 
 async function apiFetch(path, options = {}) {
+  const { headers: extraHeaders = {}, ...restOptions } = options;
   const request = {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-    ...options,
+    ...restOptions,
+    headers: { "Content-Type": "application/json", ...extraHeaders },
   };
   console.log("[auth] fetch start", request.method || "GET", path);
   const res = await fetch(path, request);
