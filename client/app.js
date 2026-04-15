@@ -38,9 +38,15 @@ async function apiFetch(path, options = {}) {
   console.log("[auth] fetch response", request.method || "GET", path, res.status);
 
   const contentType = res.headers.get("content-type") || "";
-  const payload = contentType.includes("application/json")
-    ? await res.json().catch(() => ({}))
-    : await res.text();
+  const raw = await res.text();
+  let payload = raw;
+  if (contentType.includes("application/json")) {
+    try {
+      payload = raw ? JSON.parse(raw) : {};
+    } catch {
+      payload = raw;
+    }
+  }
 
   if (!res.ok) {
     const errorMessage =
@@ -146,6 +152,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (!payload.firstName || !payload.lastName || !payload.email || !payload.password || !payload.confirmPassword) {
       showError(signupError, "Please complete all required sign-up fields.");
+      return;
+    }
+    if (payload.password !== payload.confirmPassword) {
+      showError(signupError, "Password and confirm password must match.");
       return;
     }
 
