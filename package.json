@@ -5,9 +5,7 @@
   "scripts": {
     "install": "npm --prefix server install",
     "start": "npm --prefix server start",
-    "dev": "npm --prefix server run dev",
-    "seed:admin": "npm --prefix server run seed:admin",
-    "promote:admin": "npm --prefix server run promote:admin --"
+    "dev": "npm --prefix server run dev"
   },
   "engines": {
     "node": ">=20"
