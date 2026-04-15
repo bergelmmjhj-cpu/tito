@@ -79,6 +79,13 @@ Repository: TITO (Hotel Staff Time Clock)
 - Add explicit `Login Page` shortcut controls in admin and worker headers.
 - Reduce user confusion when landing on shell routes by providing immediate path back to root sign-in.
 
+### Commit 8 - Build Fingerprint Verification
+- Add visible build fingerprint badges on login, admin, and worker shells.
+- Improve runtime diagnostics by making it obvious whether users are seeing this repository's latest UI build.
+
 ## Risk Notes
 - Current worktree already includes a restoration of production entrypoint files after a prior regression merge; those changes remain staged as baseline and should be reviewed together with phase commits.
 - Runtime verification requires Node/npm environment; static diagnostics pass in-editor.
+npm install
+npm --prefix server install
+npm start

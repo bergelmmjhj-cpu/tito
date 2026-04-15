@@ -27,6 +27,20 @@ body {
   min-height: 100vh;
 }
 
+.build-fingerprint {
+  position: fixed;
+  right: 12px;
+  bottom: 10px;
+  z-index: 9999;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(8, 16, 32, 0.78);
+  color: var(--muted);
+  font-size: 0.75rem;
+  letter-spacing: 0.03em;
+}
+
 /* ── Top navigation bar ──────────────────────────────────────────────────── */
 .topnav {
   display: flex;
