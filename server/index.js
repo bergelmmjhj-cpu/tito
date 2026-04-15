@@ -11,7 +11,6 @@ const clientDir = path.resolve(__dirname, "../client");
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static(clientDir));
 
 // In-memory store (v1)
 const shiftsByWorker = new Map(); // workerId -> array of shift records
@@ -98,6 +97,8 @@ app.get("/logs/:workerId", (req, res) => {
   const logs = getWorkerLogs(wid);
   res.json(logs);
 });
+
+app.use(express.static(clientDir));
 
 app.listen(PORT, () => {
   console.log(`TimeClock API listening on http://localhost:${PORT}`);

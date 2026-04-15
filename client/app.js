@@ -8,9 +8,11 @@ const refreshLogsBtn = document.getElementById("refreshLogsBtn");
 const resultEl = document.getElementById("result");
 const logsEl = document.getElementById("logs");
 
-const API_BASE_URL = window.location.protocol.startsWith("http")
-  ? window.location.origin
-  : "http://localhost:3000";
+const API_BASE_URL = window.__API_BASE_URL || (
+  window.location.protocol.startsWith("http")
+    ? window.location.origin
+    : "http://localhost:3000"
+);
 
 function setResult(objOrText) {
   if (typeof objOrText === "string") {
