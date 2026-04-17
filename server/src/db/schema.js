@@ -25,6 +25,8 @@ const CREATE_TABLES_SQL = `
     password_salt TEXT,
     password_hash TEXT,
     profile JSONB DEFAULT '{}',
+    deactivated_at TIMESTAMP,
+    force_password_reset BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_from VARCHAR(100) DEFAULT 'manual'
@@ -69,6 +71,33 @@ const CREATE_TABLES_SQL = `
   );
 
   CREATE INDEX IF NOT EXISTS idx_assignments_workplace_id ON user_workplace_assignments(workplace_id);
+
+  -- Hotel assignments (many-to-many)
+  CREATE TABLE IF NOT EXISTS hotel_assignments (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    workplace_id TEXT NOT NULL REFERENCES workplaces(id) ON DELETE CASCADE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    PRIMARY KEY (user_id, workplace_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_hotel_assignments_workplace_id ON hotel_assignments(workplace_id);
+
+  -- Audit log
+  CREATE TABLE IF NOT EXISTS audit_log (
+    id BIGSERIAL PRIMARY KEY,
+    user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    action TEXT NOT NULL,
+    target_type TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    old_value JSONB,
+    new_value JSONB,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_audit_log_user_id ON audit_log(user_id);
+  CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action);
+  CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at DESC);
 
   -- Payroll periods
   CREATE TABLE IF NOT EXISTS payroll_periods (
@@ -135,7 +164,7 @@ const CREATE_TABLES_SQL = `
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     shift_id TEXT NOT NULL REFERENCES shifts(id) ON DELETE CASCADE,
-    action_type VARCHAR(50) NOT NULL CHECK (action_type IN ('clock_in', 'break_start', 'break_end', 'clock_out', 'admin_review', 'admin_close_shift', 'admin_end_break', 'admin_payable_adjustment', 'admin_payroll_approved', 'admin_payroll_exported', 'admin_payroll_reopened')),
+    action_type VARCHAR(50) NOT NULL CHECK (action_type IN ('clock_in', 'break_start', 'break_end', 'clock_out', 'auto_clock_out', 'admin_review', 'admin_close_shift', 'admin_end_break', 'admin_payable_adjustment', 'admin_payroll_approved', 'admin_payroll_exported', 'admin_payroll_reopened')),
     timestamp TIMESTAMP NOT NULL,
     location JSONB,
     geofence JSONB,

@@ -9,6 +9,7 @@ import {
 } from "../models/userModel.js";
 import { HttpError } from "../utils/errors.js";
 import { createPasswordHash } from "../utils/password.js";
+import { createAuditLogEntry, listAuditLogEntries } from "../models/auditLogModel.js";
 
 const PASSWORD_MIN_LENGTH = 8;
 const ALLOWED_ROLES = new Set(["admin", "worker"]);
@@ -51,6 +52,10 @@ function normalizeRole(role) {
 function validatePassword(password, confirmPassword) {
   if (typeof password !== "string" || password.length < PASSWORD_MIN_LENGTH) {
     throw new HttpError(400, `Password must be at least ${PASSWORD_MIN_LENGTH} characters`);
+  }
+
+  if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+    throw new HttpError(400, "Password must include at least one letter and one number");
   }
 
   if (password !== confirmPassword) {
@@ -154,12 +159,22 @@ export async function setUserActiveStateByAdmin(userId, isActive, actor = null) 
 
   const updated = await updateUserById(userId, {
     isActive,
+    deactivatedAt: isActive ? null : new Date().toISOString(),
     profile: {
       ...(target.profile && typeof target.profile === "object" ? target.profile : {}),
       updatedByUserId: actor?.id || null,
       updatedByAdminAt: new Date().toISOString(),
     },
     updatedAt: new Date().toISOString(),
+  });
+
+  await createAuditLogEntry({
+    userId: actor?.id || null,
+    action: isActive ? "reactivate_user" : "deactivate_user",
+    targetType: "user",
+    targetId: userId,
+    oldValue: { isActive: target.isActive !== false },
+    newValue: { isActive },
   });
 
   return sanitizeUser(updated);
@@ -198,5 +213,57 @@ export async function setUserRoleByAdmin(userId, role, actor = null) {
     updatedAt: new Date().toISOString(),
   });
 
+  await createAuditLogEntry({
+    userId: actor?.id || null,
+    action: "change_role",
+    targetType: "user",
+    targetId: userId,
+    oldValue: { role: target.role },
+    newValue: { role: normalizedRole },
+  });
+
   return sanitizeUser(updated);
+}
+
+export async function resetUserPasswordByAdmin(userId, actor = null) {
+  const target = await findUserById(userId);
+  if (!target) throw new HttpError(404, "User not found");
+
+  const token = crypto.randomUUID();
+  const resetUrl = `https://app.local/reset-password?token=${token}&user=${encodeURIComponent(userId)}`;
+
+  await updateUserById(userId, {
+    forcePasswordReset: true,
+    profile: {
+      ...(target.profile && typeof target.profile === "object" ? target.profile : {}),
+      resetPasswordToken: token,
+      resetPasswordRequestedAt: new Date().toISOString(),
+      updatedByUserId: actor?.id || null,
+    },
+    updatedAt: new Date().toISOString(),
+  });
+
+  await createAuditLogEntry({
+    userId: actor?.id || null,
+    action: "reset_password_requested",
+    targetType: "user",
+    targetId: userId,
+    oldValue: { forcePasswordReset: target.forcePasswordReset === true },
+    newValue: { forcePasswordReset: true },
+  });
+
+  console.info("[admin.users.reset-password] placeholder email", {
+    to: target.email,
+    resetUrl,
+  });
+
+  return {
+    userId,
+    email: target.email,
+    resetUrl,
+  };
+}
+
+export async function listAdminAuditLogs(filters = {}) {
+  return listAuditLogEntries(filters);
 }

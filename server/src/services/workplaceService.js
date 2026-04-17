@@ -49,10 +49,14 @@ function validateCoordinates(latitude, longitude) {
   return { latitude: lat, longitude: lon };
 }
 
+export function hasZeroCoordinates(latitude, longitude) {
+  return Number(latitude) === 0 && Number(longitude) === 0;
+}
+
 function validateRadius(radius) {
   const r = normalizeNumber(radius, "geofenceRadiusMeters");
-  if (r < 10 || r > 10000) {
-    throw new HttpError(400, "geofenceRadiusMeters must be between 10 and 10000");
+  if (r < 50 || r > 500) {
+    throw new HttpError(400, "geofenceRadiusMeters must be between 50 and 500");
   }
   return r;
 }
@@ -68,6 +72,22 @@ function normalizeOptionalTimeZone(value) {
   }
 
   return clean;
+}
+
+export function assertActiveWorkplaceIntegrity(workplace) {
+  const lat = Number(workplace?.latitude);
+  const lon = Number(workplace?.longitude);
+  if (hasZeroCoordinates(lat, lon)) {
+    throw new HttpError(400, "Active workplaces cannot use 0,0 coordinates");
+  }
+
+  const tz = typeof workplace?.timeZone === "string" ? workplace.timeZone.trim() : "";
+  if (!tz) {
+    throw new HttpError(400, "Active workplaces must include a valid timeZone");
+  }
+  if (!isValidTimeZone(tz)) {
+    throw new HttpError(400, "timeZone must be a valid IANA time zone, for example America/New_York");
+  }
 }
 
 function normalizeWorkplacePayload(payload, { partial = false } = {}) {
@@ -141,6 +161,10 @@ export async function addWorkplace(payload, actor) {
   const now = new Date().toISOString();
   const clean = normalizeWorkplacePayload(payload, { partial: false });
 
+  if (clean.active !== false) {
+    assertActiveWorkplaceIntegrity(clean);
+  }
+
   return createWorkplace({
     id: crypto.randomUUID(),
     ...clean,
@@ -162,6 +186,9 @@ export async function editWorkplace(workplaceId, payload) {
   if (!existing) throw new HttpError(404, "Workplace not found");
 
   const patch = normalizeWorkplacePayload(payload, { partial: true });
+  if ((patch.active ?? existing.active) !== false) {
+    assertActiveWorkplaceIntegrity({ ...existing, ...patch });
+  }
   patch.updatedAt = new Date().toISOString();
 
   const updated = await updateWorkplace(workplaceId, patch);
@@ -174,6 +201,10 @@ export async function setWorkplaceActive(workplaceId, active) {
 
   const existing = await findWorkplaceById(workplaceId);
   if (!existing) throw new HttpError(404, "Workplace not found");
+
+  if (active) {
+    assertActiveWorkplaceIntegrity(existing);
+  }
 
   const updated = await updateWorkplace(workplaceId, {
     active,
@@ -188,6 +219,80 @@ export async function getWorkplaceById(workplaceId) {
   const workplace = await findWorkplaceById(workplaceId);
   if (!workplace) throw new HttpError(404, "Workplace not found");
   return workplace;
+}
+
+function normalizeKeyPart(value) {
+  return typeof value === "string" && value.trim() ? value.trim().toUpperCase() : "(UNKNOWN)";
+}
+
+export function buildDuplicateGroups(workplaces) {
+  const groups = new Map();
+
+  for (const workplace of workplaces) {
+    const key = `${normalizeKeyPart(workplace.name)}|${normalizeKeyPart(workplace.city)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(workplace);
+  }
+
+  return [...groups.entries()]
+    .filter(([, list]) => list.length > 1)
+    .map(([key, list]) => ({
+      key,
+      normalizedName: normalizeKeyPart(list[0]?.name),
+      normalizedCity: normalizeKeyPart(list[0]?.city),
+      items: list
+        .slice()
+        .sort((a, b) => Date.parse(a.createdAt || "") - Date.parse(b.createdAt || ""))
+        .map((item) => ({
+          id: item.id,
+          name: item.name,
+          city: item.city || "",
+          timeZone: item.timeZone || null,
+          latitude: item.latitude,
+          longitude: item.longitude,
+          active: item.active !== false,
+          createdAt: item.createdAt || null,
+          source: item.crm?.source || "local",
+        })),
+    }));
+}
+
+export async function validateHotelsData() {
+  const workplaces = await getWorkplaces(true);
+
+  const invalidCoordinates = workplaces
+    .filter((item) => hasZeroCoordinates(item.latitude, item.longitude))
+    .map((item) => ({
+      id: item.id,
+      name: item.name,
+      city: item.city || "",
+      latitude: item.latitude,
+      longitude: item.longitude,
+      active: item.active !== false,
+    }));
+
+  const missingTimeZone = workplaces
+    .filter((item) => !item.timeZone || !String(item.timeZone).trim())
+    .map((item) => ({
+      id: item.id,
+      name: item.name,
+      city: item.city || "",
+      active: item.active !== false,
+    }));
+
+  const duplicates = buildDuplicateGroups(workplaces);
+
+  return {
+    totals: {
+      workplaces: workplaces.length,
+      invalidCoordinates: invalidCoordinates.length,
+      missingTimeZone: missingTimeZone.length,
+      duplicateGroups: duplicates.length,
+    },
+    invalidCoordinates,
+    missingTimeZone,
+    duplicates,
+  };
 }
 
 // --- CRM DB functions (CRM_DATABASE_URL) ---

@@ -20,6 +20,7 @@ import {
   reopenAdminPayrollPeriod,
   reopenAdminPayrollExportBatch,
   reissueAdminPayrollExportBatch,
+  resolveAdminTimesheetsBulk,
   resolveAdminTimesheet,
 } from "../services/adminTimesheetService.js";
 import { toHttpError } from "../utils/errors.js";
@@ -424,6 +425,22 @@ export async function resolveTimesheetController(req, res) {
     console.error("[admin.timesheets.resolve] failed", {
       adminUserId: req.user?.id || null,
       shiftId: req.params.shiftId,
+      message: error?.message || "unknown_error",
+      name: error?.name || "Error",
+      stack: error?.stack || "no_stack",
+    });
+    const err = toHttpError(error);
+    res.status(err.status).json({ error: err.message });
+  }
+}
+
+export async function bulkResolveTimesheetsController(req, res) {
+  try {
+    const summary = await resolveAdminTimesheetsBulk(req.body || {}, req.user);
+    res.json({ summary });
+  } catch (error) {
+    console.error("[admin.timesheets.bulkResolve] failed", {
+      adminUserId: req.user?.id || null,
       message: error?.message || "unknown_error",
       name: error?.name || "Error",
       stack: error?.stack || "no_stack",

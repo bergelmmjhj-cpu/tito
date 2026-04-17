@@ -4,6 +4,7 @@ import {
   parsePayrollExportBatchActionPayload,
   parsePayrollPeriodPayload,
   parseTimesheetResolutionPayload,
+  parseBulkTimesheetResolutionPayload,
 } from "./adminTimesheetService.js";
 
 test("parseTimesheetResolutionPayload requires at least one actionable change", () => {
@@ -17,7 +18,7 @@ test("parseTimesheetResolutionPayload requires a manager note", () => {
   assert.throws(
     () =>
       parseTimesheetResolutionPayload({
-        reviewStatus: "reviewed",
+        reviewStatus: "approved",
       }),
     /reviewNote is required/
   );
@@ -25,13 +26,13 @@ test("parseTimesheetResolutionPayload requires a manager note", () => {
 
 test("parseTimesheetResolutionPayload normalizes timestamps and payable hours", () => {
   const parsed = parseTimesheetResolutionPayload({
-    reviewStatus: "follow_up_required",
+    reviewStatus: "needs_correction",
     reviewNote: "Needs payroll follow-up.",
     closeOpenShiftAt: "2026-04-14T18:30:00.000Z",
     payableHours: "7.5",
   });
 
-  assert.equal(parsed.reviewStatus, "follow_up_required");
+  assert.equal(parsed.reviewStatus, "needs_correction");
   assert.equal(parsed.reviewNote, "Needs payroll follow-up.");
   assert.equal(parsed.closeOpenShiftAt, "2026-04-14T18:30:00.000Z");
   assert.equal(parsed.payableHours, 7.5);
@@ -40,7 +41,7 @@ test("parseTimesheetResolutionPayload normalizes timestamps and payable hours", 
 
 test("parseTimesheetResolutionPayload accepts payroll status updates", () => {
   const parsed = parseTimesheetResolutionPayload({
-    reviewStatus: "reviewed",
+    reviewStatus: "approved",
     payrollStatus: "approved",
     reviewNote: "Cleared for payroll.",
   });
@@ -53,7 +54,7 @@ test("parseTimesheetResolutionPayload rejects invalid payroll statuses", () => {
   assert.throws(
     () =>
       parseTimesheetResolutionPayload({
-        reviewStatus: "reviewed",
+        reviewStatus: "approved",
         payrollStatus: "processing",
         reviewNote: "Invalid payroll status.",
       }),
@@ -65,12 +66,49 @@ test("parseTimesheetResolutionPayload rejects manual exported transitions", () =
   assert.throws(
     () =>
       parseTimesheetResolutionPayload({
-        reviewStatus: "reviewed",
+        reviewStatus: "approved",
         payrollStatus: "exported",
         reviewNote: "Export should happen through a batch.",
       }),
     /payrollStatus must be one of: pending, approved/
   );
+});
+
+test("parseTimesheetResolutionPayload accepts legacy review status aliases", () => {
+  const parsedReviewed = parseTimesheetResolutionPayload({
+    reviewStatus: "reviewed",
+    reviewNote: "legacy alias",
+  });
+  assert.equal(parsedReviewed.reviewStatus, "approved");
+
+  const parsedFollowUp = parseTimesheetResolutionPayload({
+    reviewStatus: "follow_up_required",
+    reviewNote: "legacy alias 2",
+  });
+  assert.equal(parsedFollowUp.reviewStatus, "needs_correction");
+});
+
+test("parseTimesheetResolutionPayload returns override/retry geofence fields", () => {
+  const parsed = parseTimesheetResolutionPayload({
+    reviewStatus: "approved",
+    reviewNote: "override geofence",
+    overrideWorkplaceId: "wp-1",
+    retryGeofence: true,
+  });
+
+  assert.equal(parsed.overrideWorkplaceId, "wp-1");
+  assert.equal(parsed.retryGeofence, true);
+});
+
+test("parseBulkTimesheetResolutionPayload validates IDs and wraps resolution", () => {
+  const parsed = parseBulkTimesheetResolutionPayload({
+    shiftIds: ["s1", "s2"],
+    reviewStatus: "approved",
+    reviewNote: "bulk",
+  });
+
+  assert.deepEqual(parsed.shiftIds, ["s1", "s2"]);
+  assert.equal(parsed.resolution.reviewStatus, "approved");
 });
 
 test("parsePayrollExportBatchActionPayload requires a reopen note", () => {

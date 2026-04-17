@@ -87,6 +87,8 @@ async function applySchemaAlterations() {
   const alterations = [
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id VARCHAR(255) UNIQUE`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS google_email VARCHAR(255)`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS deactivated_at TIMESTAMP`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS force_password_reset BOOLEAN NOT NULL DEFAULT FALSE`,
     `CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id)`,
     `ALTER TABLE users ALTER COLUMN password_salt DROP NOT NULL`,
     `ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL`,
@@ -165,9 +167,30 @@ async function applySchemaAlterations() {
     `CREATE INDEX IF NOT EXISTS idx_payroll_export_batches_status ON payroll_export_batches(status)`,
     `CREATE INDEX IF NOT EXISTS idx_payroll_export_batches_supersedes ON payroll_export_batches(supersedes_batch_id)`,
     `CREATE INDEX IF NOT EXISTS idx_payroll_export_batches_replaced_by ON payroll_export_batches(replaced_by_batch_id)`,
+    `CREATE TABLE IF NOT EXISTS hotel_assignments (
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      workplace_id TEXT NOT NULL REFERENCES workplaces(id) ON DELETE CASCADE,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+      PRIMARY KEY (user_id, workplace_id)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_hotel_assignments_workplace_id ON hotel_assignments(workplace_id)`,
+    `CREATE TABLE IF NOT EXISTS audit_log (
+      id BIGSERIAL PRIMARY KEY,
+      user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      action TEXT NOT NULL,
+      target_type TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      old_value JSONB,
+      new_value JSONB,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_audit_log_user_id ON audit_log(user_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action)`,
+    `CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at DESC)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS uq_shifts_one_open_per_user ON shifts(user_id) WHERE clock_out_at IS NULL`,
     `ALTER TABLE time_logs DROP CONSTRAINT IF EXISTS time_logs_action_type_check`,
-    `ALTER TABLE time_logs ADD CONSTRAINT time_logs_action_type_check CHECK (action_type IN ('clock_in', 'break_start', 'break_end', 'clock_out', 'admin_review', 'admin_close_shift', 'admin_end_break', 'admin_payable_adjustment', 'admin_payroll_approved', 'admin_payroll_exported', 'admin_payroll_reopened'))`,
+    `ALTER TABLE time_logs ADD CONSTRAINT time_logs_action_type_check CHECK (action_type IN ('clock_in', 'break_start', 'break_end', 'clock_out', 'auto_clock_out', 'admin_review', 'admin_close_shift', 'admin_end_break', 'admin_payable_adjustment', 'admin_payroll_approved', 'admin_payroll_exported', 'admin_payroll_reopened'))`,
   ];
 
   for (const sql of alterations) {

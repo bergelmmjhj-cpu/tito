@@ -82,8 +82,8 @@ export async function createUser(userRecord) {
     `INSERT INTO users (
       id, first_name, last_name, name, email, phone, staff_id, role,
       is_active, google_id, google_email, password_salt, password_hash,
-      profile, created_at, updated_at, created_from
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+      profile, deactivated_at, force_password_reset, created_at, updated_at, created_from
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
     RETURNING *`,
     [
       userRecord.id,
@@ -100,6 +100,8 @@ export async function createUser(userRecord) {
       userRecord.passwordSalt,
       userRecord.passwordHash,
       profile,
+      userRecord.deactivatedAt || null,
+      userRecord.forcePasswordReset === true,
       userRecord.createdAt || new Date().toISOString(),
       userRecord.updatedAt || new Date().toISOString(),
       userRecord.profile?.createdFrom || "manual",
@@ -172,6 +174,8 @@ function camelToPgColumn(camel) {
     passwordSalt: "password_salt",
     passwordHash: "password_hash",
     profile: "profile",
+    deactivatedAt: "deactivated_at",
+    forcePasswordReset: "force_password_reset",
     createdAt: "created_at",
     updatedAt: "updated_at",
     createdFrom: "created_from",
@@ -195,6 +199,8 @@ function normalizeDbUser(dbRow) {
     googleId: dbRow.google_id || null,
     googleEmail: dbRow.google_email || null,
     profile: dbRow.profile ? (typeof dbRow.profile === "string" ? JSON.parse(dbRow.profile) : dbRow.profile) : {},
+    deactivatedAt: dbRow.deactivated_at || null,
+    forcePasswordReset: dbRow.force_password_reset === true,
     passwordSalt: dbRow.password_salt,
     passwordHash: dbRow.password_hash,
     createdAt: dbRow.created_at,

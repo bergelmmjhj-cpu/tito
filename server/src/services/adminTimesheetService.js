@@ -20,18 +20,18 @@ import {
   getAllShifts,
   getAllTimeLogs,
   getShiftById,
+  setShiftClockInGeofence,
   getTimeLogsForShift,
 } from "../models/timeLogModel.js";
 import { buildShiftHourSummary } from "./payableHoursService.js";
+import { calculateDistanceMeters } from "./geofenceService.js";
 import { HttpError } from "../utils/errors.js";
 import { formatBusinessDate, resolveBusinessTimeZone } from "../utils/time.js";
 
 const LOW_ACCURACY_THRESHOLD_METERS = 50;
-const SUSPICIOUS_SHORT_SHIFT_HOURS = 1;
-const OVERLONG_SHIFT_HOURS = 16;
 const DEFAULT_PAGE_LIMIT = 50;
 const MAX_PAGE_LIMIT = 200;
-const REVIEW_STATUSES = new Set(["reviewed", "follow_up_required"]);
+const REVIEW_STATUSES = new Set(["pending", "approved", "rejected", "needs_correction"]);
 const PAYROLL_STATUSES = new Set(["pending", "approved", "exported"]);
 const MANUAL_PAYROLL_STATUSES = new Set(["pending", "approved"]);
 const ADMIN_REVIEW_NOTE_MAX_LENGTH = 1000;
@@ -141,8 +141,6 @@ function buildTimesheetRow(shift, user, shiftLogs, workplaceIndex, userIndex = {
   const status = deriveShiftStatus(shift);
   const finalActualHours = typeof shift?.actualHours === "number" ? shift.actualHours : summary.actualHours;
   const finalPayableHours = typeof shift?.payableHours === "number" ? shift.payableHours : summary.payableHours;
-  const suspiciousShortShift = typeof finalActualHours === "number" && finalActualHours > 0 && finalActualHours < SUSPICIOUS_SHORT_SHIFT_HOURS;
-  const overlongShift = typeof finalActualHours === "number" && finalActualHours > OVERLONG_SHIFT_HOURS;
   const payableHoursAdjusted =
     summary.payableHours !== null &&
     typeof finalPayableHours === "number" &&
@@ -152,12 +150,10 @@ function buildTimesheetRow(shift, user, shiftLogs, workplaceIndex, userIndex = {
     lowAccuracy ||
     outsideGeofence ||
     unresolvedWorkplace ||
-    suspiciousShortShift ||
-    overlongShift ||
     status === "open_shift" ||
     status === "missing_break_end";
   const reviewStatus = shift?.reviewStatus || null;
-  const reviewPending = hasException && !reviewStatus;
+  const reviewPending = hasException && (!reviewStatus || reviewStatus === "pending");
   const reviewedByName = shift?.reviewedBy ? userIndex[shift.reviewedBy]?.name || null : null;
   const payrollStatus = PAYROLL_STATUSES.has(shift?.payrollStatus) ? shift.payrollStatus : "pending";
   const payrollApprovedByName = shift?.payrollApprovedBy
@@ -166,7 +162,7 @@ function buildTimesheetRow(shift, user, shiftLogs, workplaceIndex, userIndex = {
   const payrollExportedByName = shift?.payrollExportedBy
     ? userIndex[shift.payrollExportedBy]?.name || null
     : null;
-  const readyForPayroll = status === "completed" && reviewStatus === "reviewed";
+  const readyForPayroll = status === "completed" && reviewStatus === "approved";
 
   return {
     shiftId: shift.id,
@@ -213,10 +209,6 @@ function buildTimesheetRow(shift, user, shiftLogs, workplaceIndex, userIndex = {
     locationAccuracy: typeof clockInLocation?.accuracy === "number" ? clockInLocation.accuracy : null,
     noLocation,
     lowAccuracy,
-    suspiciousShortShift,
-    overlongShift,
-    duplicateShift: false,
-    hasException,
     hasActiveBreak: hasActiveBreak(shift),
     reviewStatus,
     reviewPending,
@@ -260,12 +252,11 @@ function matchesStatus(row, status) {
   if (status === "low_accuracy") return row.lowAccuracy;
   if (status === "outside_geofence") return row.outsideGeofence;
   if (status === "workplace_unresolved") return row.unresolvedWorkplace;
-  if (status === "duplicate_shift") return row.duplicateShift;
-  if (status === "suspicious_short_shift") return row.suspiciousShortShift;
-  if (status === "over_16_hours") return row.overlongShift;
-  if (status === "pending_review") return row.reviewPending;
-  if (status === "reviewed") return row.reviewStatus === "reviewed";
-  if (status === "follow_up_required") return row.reviewStatus === "follow_up_required";
+  if (status === "pending_review") return row.reviewPending || row.reviewStatus === "pending";
+  if (status === "pending") return row.reviewStatus === "pending";
+  if (status === "approved") return row.reviewStatus === "approved";
+  if (status === "rejected") return row.reviewStatus === "rejected";
+  if (status === "needs_correction") return row.reviewStatus === "needs_correction";
   return row.status === status;
 }
 
@@ -275,14 +266,16 @@ function matchesPayrollStatus(row, payrollStatus) {
 }
 
 function isEligibleForPayrollExport(row) {
-  return row?.status === "completed" && row?.reviewStatus === "reviewed" && row?.payrollStatus === "approved";
+  return row?.status === "completed" && row?.reviewStatus === "approved" && row?.payrollStatus === "approved";
 }
 
 function normalizeReviewStatus(value) {
   if (value === undefined || value === null || value === "") return null;
   const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (normalized === "reviewed") return "approved";
+  if (normalized === "follow_up_required") return "needs_correction";
   if (!REVIEW_STATUSES.has(normalized)) {
-    throw new HttpError(400, "reviewStatus must be one of: reviewed, follow_up_required");
+    throw new HttpError(400, "reviewStatus must be one of: pending, approved, rejected, needs_correction");
   }
   return normalized;
 }
@@ -481,23 +474,6 @@ async function getFilteredTimesheetRows(filters) {
     )
   );
 
-  // Mark potential duplicate shifts: same worker with multiple shifts on the same business date.
-  const duplicateGroups = rows.reduce((map, row) => {
-    const key = `${row.workerId || ""}|${row.date || ""}`;
-    if (!map.has(key)) map.set(key, []);
-    map.get(key).push(row);
-    return map;
-  }, new Map());
-
-  for (const groupedRows of duplicateGroups.values()) {
-    if (groupedRows.length <= 1) continue;
-    for (const row of groupedRows) {
-      row.duplicateShift = true;
-      row.hasException = true;
-      if (!row.reviewFlag) row.reviewFlag = "duplicate_shift";
-    }
-  }
-
   return rows.filter((row) => {
     if (filters.payPeriodId && row.payPeriodId !== filters.payPeriodId) return false;
     if (filters.workerId && row.workerId !== filters.workerId) return false;
@@ -552,12 +528,11 @@ export function parseTimesheetFilters(query) {
     "low_accuracy",
     "outside_geofence",
     "workplace_unresolved",
-    "duplicate_shift",
-    "suspicious_short_shift",
-    "over_16_hours",
     "pending_review",
-    "reviewed",
-    "follow_up_required",
+    "pending",
+    "approved",
+    "rejected",
+    "needs_correction",
     "",
   ]);
   const cleanStatus = typeof status === "string" && allowedStatuses.has(status) ? status : "";
@@ -987,6 +962,11 @@ export function parseTimesheetResolutionPayload(payload = {}) {
   const closeActiveBreakAt = parseOptionalIsoDateTime(payload.closeActiveBreakAt, "closeActiveBreakAt");
   const payableHours = parseOptionalPayableHours(payload.payableHours);
   const payrollStatus = parseOptionalPayrollStatus(payload.payrollStatus);
+  const overrideWorkplaceId =
+    typeof payload.overrideWorkplaceId === "string" && payload.overrideWorkplaceId.trim()
+      ? payload.overrideWorkplaceId.trim()
+      : null;
+  const retryGeofence = payload.retryGeofence === true;
 
   const hasOperationalChange = Boolean(
     closeOpenShiftAt || closeActiveBreakAt || payableHours !== null || payrollStatus
@@ -997,6 +977,11 @@ export function parseTimesheetResolutionPayload(payload = {}) {
   }
 
   const reviewNote = normalizeReviewNote(payload.reviewNote);
+  if (reviewStatus === "rejected" || reviewStatus === "needs_correction") {
+    if (!reviewNote || !reviewNote.trim()) {
+      throw new HttpError(400, "reviewNote is required when status is rejected or needs_correction");
+    }
+  }
 
   return {
     reviewStatus,
@@ -1005,7 +990,63 @@ export function parseTimesheetResolutionPayload(payload = {}) {
     closeActiveBreakAt,
     payableHours,
     payrollStatus,
+    overrideWorkplaceId,
+    retryGeofence,
     hasOperationalChange,
+  };
+}
+
+function validateOverrideWorkplace(workplaceId, workplaceIndex) {
+  if (!workplaceId) return null;
+  const wp = workplaceIndex[workplaceId] || null;
+  if (!wp) throw new HttpError(404, "overrideWorkplaceId not found");
+  return wp;
+}
+
+function deriveRetryGeofencePayload(clockInLog, workplaceIndex) {
+  const location = clockInLog?.location;
+  if (!location || typeof location.latitude !== "number" || typeof location.longitude !== "number") {
+    throw new HttpError(409, "Cannot retry geofence because clock-in location is unavailable");
+  }
+
+  const candidates = Object.values(workplaceIndex || {}).filter((wp) => wp && wp.active !== false);
+  if (candidates.length === 0) {
+    throw new HttpError(409, "Cannot retry geofence because no active workplaces are available");
+  }
+
+  let best = null;
+  for (const workplace of candidates) {
+    if (typeof workplace.latitude !== "number" || typeof workplace.longitude !== "number") continue;
+    const dist = calculateDistanceMeters(
+      { latitude: location.latitude, longitude: location.longitude },
+      { latitude: workplace.latitude, longitude: workplace.longitude }
+    );
+    if (!best || dist < best.distanceMeters) {
+      best = {
+        workplace,
+        distanceMeters: dist,
+      };
+    }
+  }
+
+  if (!best) {
+    throw new HttpError(409, "Cannot retry geofence because no valid workplace coordinates are available");
+  }
+
+  const radiusMeters = Number(best.workplace.geofenceRadiusMeters || 150);
+  const withinGeofence = best.distanceMeters <= radiusMeters;
+  return {
+    workplaceId: best.workplace.id,
+    workplaceName: best.workplace.name,
+    resolvedWorkplaceId: best.workplace.id,
+    resolvedWorkplaceName: best.workplace.name,
+    businessTimeZone: resolveBusinessTimeZone(best.workplace.timeZone),
+    radiusMeters,
+    distanceMeters: Number(best.distanceMeters.toFixed(2)),
+    withinGeofence,
+    geofenceMatched: withinGeofence,
+    workplaceResolution: withinGeofence ? "assigned" : "nearest",
+    reviewFlag: withinGeofence ? null : "outside_geofence",
   };
 }
 
@@ -1020,12 +1061,94 @@ export async function resolveAdminTimesheet(shiftId, payload, actor) {
   }
 
   const parsed = parseTimesheetResolutionPayload(payload);
+  if (parsed.overrideWorkplaceId || parsed.retryGeofence) {
+    const [workplaceIndex, logs] = await Promise.all([buildWorkplaceIndex(), getTimeLogsForShift(shiftId)]);
+    const clockInLog = firstLogOfType(logs, "clock_in");
+    if (!clockInLog) throw new HttpError(404, "Clock-in log not found for shift");
+
+    let geofencePatch = null;
+    if (parsed.overrideWorkplaceId) {
+      const overrideWorkplace = validateOverrideWorkplace(parsed.overrideWorkplaceId, workplaceIndex);
+      geofencePatch = {
+        ...(clockInLog.geofence || {}),
+        workplaceId: overrideWorkplace.id,
+        workplaceName: overrideWorkplace.name,
+        resolvedWorkplaceId: overrideWorkplace.id,
+        resolvedWorkplaceName: overrideWorkplace.name,
+        businessTimeZone: resolveBusinessTimeZone(overrideWorkplace.timeZone),
+        workplaceResolution: "admin_override",
+        reviewFlag: null,
+      };
+    } else if (parsed.retryGeofence) {
+      geofencePatch = {
+        ...(clockInLog.geofence || {}),
+        ...deriveRetryGeofencePayload(clockInLog, workplaceIndex),
+      };
+    }
+
+    if (geofencePatch) {
+      await setShiftClockInGeofence(shiftId, geofencePatch);
+    }
+  }
+
   await applyAdminShiftResolution(shiftId, actor.id, {
     ...parsed,
-    reviewStatus: parsed.reviewStatus || (parsed.hasOperationalChange ? "reviewed" : null),
+    reviewStatus: parsed.reviewStatus || (parsed.hasOperationalChange ? "approved" : null),
   });
 
   return getAdminTimesheetDetail(shiftId);
+}
+
+export function parseBulkTimesheetResolutionPayload(payload = {}) {
+  const shiftIds = Array.isArray(payload.shiftIds)
+    ? payload.shiftIds
+        .map((item) => (typeof item === "string" ? item.trim() : ""))
+        .filter(Boolean)
+    : [];
+
+  if (shiftIds.length === 0) {
+    throw new HttpError(400, "shiftIds must include at least one shift id");
+  }
+
+  const resolution = parseTimesheetResolutionPayload(payload);
+  return {
+    shiftIds,
+    resolution,
+  };
+}
+
+export async function resolveAdminTimesheetsBulk(payload, actor) {
+  if (!actor?.id) throw new HttpError(401, "Admin user is required");
+
+  const parsed = parseBulkTimesheetResolutionPayload(payload || {});
+  const summary = {
+    total: parsed.shiftIds.length,
+    succeeded: 0,
+    failed: 0,
+    failures: [],
+  };
+
+  // Pre-validate all shift ids first so the operation is effectively all-or-none.
+  const shifts = await Promise.all(parsed.shiftIds.map((shiftId) => getShiftById(shiftId)));
+  const missing = parsed.shiftIds.filter((_, idx) => !shifts[idx]);
+  if (missing.length > 0) {
+    throw new HttpError(404, `One or more shifts were not found: ${missing.join(", ")}`);
+  }
+
+  try {
+    for (const shiftId of parsed.shiftIds) {
+      await resolveAdminTimesheet(shiftId, parsed.resolution, actor);
+      summary.succeeded += 1;
+    }
+  } catch (error) {
+    summary.failed = parsed.shiftIds.length - summary.succeeded;
+    summary.failures.push({
+      message: error?.message || "bulk_resolve_failed",
+    });
+    throw new HttpError(409, `Bulk resolve failed after ${summary.succeeded} successful updates: ${error?.message || "unknown error"}`);
+  }
+
+  return summary;
 }
 
 // ---------------------------------------------------------------------------
@@ -1062,9 +1185,6 @@ const CSV_COLUMNS = [
   { header: "Location Accuracy (m)", key: "locationAccuracy" },
   { header: "No Location", key: "noLocation" },
   { header: "Low Accuracy", key: "lowAccuracy" },
-  { header: "Suspicious Short Shift", key: "suspiciousShortShift" },
-  { header: "Over 16 Hours", key: "overlongShift" },
-  { header: "Duplicate Shift", key: "duplicateShift" },
   { header: "Review Status", key: "reviewStatus" },
   { header: "Review Pending", key: "reviewPending" },
   { header: "Review Note", key: "reviewNote" },
@@ -1102,198 +1222,149 @@ export async function buildTimesheetsCsv(filters) {
   return buildCsvFromRows(timesheets);
 }
 
-function toSafeNumber(value) {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-function buildWorkerHoursSummaryRows(timesheets) {
-  const byWorker = new Map();
-
-  for (const row of timesheets || []) {
-    const key = row.workerId || row.workerEmail || row.workerName || "unknown";
-    if (!byWorker.has(key)) {
-      byWorker.set(key, {
-        workerId: row.workerId || "",
-        workerName: row.workerName || "Unknown",
-        workerStaffId: row.workerStaffId || "",
-        workerEmail: row.workerEmail || "",
-        shiftCount: 0,
-        actualHours: 0,
-        payableHours: 0,
-        openShiftCount: 0,
-        exceptionShiftCount: 0,
-      });
-    }
-
-    const agg = byWorker.get(key);
-    agg.shiftCount += 1;
-    agg.actualHours += toSafeNumber(row.actualHours);
-    agg.payableHours += toSafeNumber(row.payableHours);
-    if (row.status === "open_shift") agg.openShiftCount += 1;
-    if (row.hasException || row.reviewPending) agg.exceptionShiftCount += 1;
-  }
-
-  return Array.from(byWorker.values())
-    .map((row) => ({
-      ...row,
-      actualHours: Number(row.actualHours.toFixed(2)),
-      payableHours: Number(row.payableHours.toFixed(2)),
-    }))
-    .sort((a, b) => a.workerName.localeCompare(b.workerName));
-}
-
-function buildHotelHoursSummaryRows(timesheets) {
-  const byHotel = new Map();
-
-  for (const row of timesheets || []) {
-    const key = row.workplaceId || row.workplaceName || "unresolved";
-    if (!byHotel.has(key)) {
-      byHotel.set(key, {
-        workplaceId: row.workplaceId || "",
-        workplaceName: row.workplaceName || "Workplace unresolved",
-        shiftCount: 0,
-        actualHours: 0,
-        payableHours: 0,
-        openShiftCount: 0,
-        exceptionShiftCount: 0,
-      });
-    }
-
-    const agg = byHotel.get(key);
-    agg.shiftCount += 1;
-    agg.actualHours += toSafeNumber(row.actualHours);
-    agg.payableHours += toSafeNumber(row.payableHours);
-    if (row.status === "open_shift") agg.openShiftCount += 1;
-    if (row.hasException || row.reviewPending) agg.exceptionShiftCount += 1;
-  }
-
-  return Array.from(byHotel.values())
-    .map((row) => ({
-      ...row,
-      actualHours: Number(row.actualHours.toFixed(2)),
-      payableHours: Number(row.payableHours.toFixed(2)),
-    }))
-    .sort((a, b) => a.workplaceName.localeCompare(b.workplaceName));
-}
-
-function buildDailyAttendanceRows(timesheets) {
-  return (timesheets || [])
-    .map((row) => ({
-      date: row.date || "",
-      workerName: row.workerName || "",
-      workerStaffId: row.workerStaffId || "",
-      workplaceName: row.workplaceName || "",
-      clockInAt: row.clockInAt || "",
-      clockOutAt: row.clockOutAt || "",
-      status: row.status || "",
-      actualHours: toSafeNumber(row.actualHours).toFixed(2),
-      payableHours: toSafeNumber(row.payableHours).toFixed(2),
-      reviewStatus: row.reviewStatus || "",
-      payrollStatus: row.payrollStatus || "",
-      reviewFlag: row.reviewFlag || "",
-    }))
-    .sort((a, b) => {
-      const dateCmp = a.date.localeCompare(b.date);
-      if (dateCmp !== 0) return dateCmp;
-      return a.workerName.localeCompare(b.workerName);
-    });
-}
-
-function buildPayrollCutoffRows(timesheets) {
-  return (timesheets || [])
-    .filter((row) => row.payrollStatus === "approved" || row.payrollStatus === "exported")
-    .map((row) => ({
-      payPeriod: row.payPeriodLabel || "",
-      businessDate: row.date || "",
-      workerName: row.workerName || "",
-      workerStaffId: row.workerStaffId || "",
-      workplaceName: row.workplaceName || "",
-      payableHours: toSafeNumber(row.payableHours).toFixed(2),
-      payrollStatus: row.payrollStatus || "",
-      reviewStatus: row.reviewStatus || "",
-      payrollApprovedAt: row.payrollApprovedAt || "",
-      payrollApprovedBy: row.payrollApprovedByName || "",
-      payrollExportedAt: row.payrollExportedAt || "",
-      payrollExportedBy: row.payrollExportedByName || "",
-    }))
-    .sort((a, b) => {
-      const periodCmp = a.payPeriod.localeCompare(b.payPeriod);
-      if (periodCmp !== 0) return periodCmp;
-      const dateCmp = a.businessDate.localeCompare(b.businessDate);
-      if (dateCmp !== 0) return dateCmp;
-      return a.workerName.localeCompare(b.workerName);
-    });
-}
-
-function buildCsvFromHeaders(rows, headers) {
-  const headerLine = headers.map((h) => escapeCsvCell(h.header)).join(",");
-  const bodyLines = (rows || []).map((row) => headers.map((h) => escapeCsvCell(row[h.key])).join(","));
-  return [headerLine, ...bodyLines].join("\r\n");
+function buildCsvFromColumns(rows, columns) {
+  const header = columns.map((column) => escapeCsvCell(column.header)).join(",");
+  const lines = rows.map((row) => columns.map((column) => escapeCsvCell(row[column.key])).join(","));
+  return [header, ...lines].join("\r\n");
 }
 
 export async function buildDailyAttendanceCsv(filters) {
-  const rows = await getFilteredTimesheetRows({ ...filters, page: 1, limit: MAX_PAGE_LIMIT * 100 });
-  const shaped = buildDailyAttendanceRows(rows);
-  return buildCsvFromHeaders(shaped, [
-    { header: "Business Date", key: "date" },
+  const allFilters = { ...filters, page: 1, limit: MAX_PAGE_LIMIT * 100 };
+  const { timesheets } = await listAdminTimesheets(allFilters);
+
+  const rows = timesheets.map((row) => ({
+    date: row.date,
+    workerName: row.workerName,
+    workerStaffId: row.workerStaffId,
+    workplaceName: row.workplaceName,
+    clockInAt: row.clockInAt,
+    clockOutAt: row.clockOutAt,
+    status: row.status,
+    reviewStatus: row.reviewStatus,
+    payrollStatus: row.payrollStatus,
+  }));
+
+  return buildCsvFromColumns(rows, [
+    { header: "Date", key: "date" },
     { header: "Worker Name", key: "workerName" },
     { header: "Staff ID", key: "workerStaffId" },
-    { header: "Hotel", key: "workplaceName" },
+    { header: "Workplace", key: "workplaceName" },
     { header: "Clock In", key: "clockInAt" },
     { header: "Clock Out", key: "clockOutAt" },
-    { header: "Status", key: "status" },
-    { header: "Actual Hours", key: "actualHours" },
-    { header: "Payable Hours", key: "payableHours" },
+    { header: "Shift Status", key: "status" },
     { header: "Review Status", key: "reviewStatus" },
     { header: "Payroll Status", key: "payrollStatus" },
-    { header: "Review Flag", key: "reviewFlag" },
-  ]);
-}
-
-export async function buildWorkerHoursSummaryCsv(filters) {
-  const rows = await getFilteredTimesheetRows({ ...filters, page: 1, limit: MAX_PAGE_LIMIT * 100 });
-  const shaped = buildWorkerHoursSummaryRows(rows);
-  return buildCsvFromHeaders(shaped, [
-    { header: "Worker Name", key: "workerName" },
-    { header: "Staff ID", key: "workerStaffId" },
-    { header: "Email", key: "workerEmail" },
-    { header: "Shift Count", key: "shiftCount" },
-    { header: "Open Shifts", key: "openShiftCount" },
-    { header: "Shifts Needing Review", key: "exceptionShiftCount" },
-    { header: "Actual Hours", key: "actualHours" },
-    { header: "Payable Hours", key: "payableHours" },
-  ]);
-}
-
-export async function buildHotelHoursSummaryCsv(filters) {
-  const rows = await getFilteredTimesheetRows({ ...filters, page: 1, limit: MAX_PAGE_LIMIT * 100 });
-  const shaped = buildHotelHoursSummaryRows(rows);
-  return buildCsvFromHeaders(shaped, [
-    { header: "Hotel", key: "workplaceName" },
-    { header: "Workplace ID", key: "workplaceId" },
-    { header: "Shift Count", key: "shiftCount" },
-    { header: "Open Shifts", key: "openShiftCount" },
-    { header: "Shifts Needing Review", key: "exceptionShiftCount" },
-    { header: "Actual Hours", key: "actualHours" },
-    { header: "Payable Hours", key: "payableHours" },
   ]);
 }
 
 export async function buildPayrollCutoffCsv(filters) {
-  const rows = await getFilteredTimesheetRows({ ...filters, page: 1, limit: MAX_PAGE_LIMIT * 100 });
-  const shaped = buildPayrollCutoffRows(rows);
-  return buildCsvFromHeaders(shaped, [
-    { header: "Pay Period", key: "payPeriod" },
-    { header: "Business Date", key: "businessDate" },
+  const allFilters = { ...filters, page: 1, limit: MAX_PAGE_LIMIT * 100 };
+  const { timesheets } = await listAdminTimesheets(allFilters);
+
+  const rows = timesheets
+    .filter((row) => row.status === "completed")
+    .map((row) => ({
+      payPeriodLabel: row.payPeriodLabel,
+      date: row.date,
+      workerName: row.workerName,
+      workerStaffId: row.workerStaffId,
+      workplaceName: row.workplaceName,
+      actualHours: row.actualHours,
+      payableHours: row.payableHours,
+      reviewStatus: row.reviewStatus,
+      payrollStatus: row.payrollStatus,
+    }));
+
+  return buildCsvFromColumns(rows, [
+    { header: "Pay Period", key: "payPeriodLabel" },
+    { header: "Date", key: "date" },
     { header: "Worker Name", key: "workerName" },
     { header: "Staff ID", key: "workerStaffId" },
-    { header: "Hotel", key: "workplaceName" },
+    { header: "Workplace", key: "workplaceName" },
+    { header: "Actual Hours", key: "actualHours" },
     { header: "Payable Hours", key: "payableHours" },
-    { header: "Payroll Status", key: "payrollStatus" },
     { header: "Review Status", key: "reviewStatus" },
-    { header: "Payroll Approved At", key: "payrollApprovedAt" },
-    { header: "Payroll Approved By", key: "payrollApprovedBy" },
-    { header: "Payroll Exported At", key: "payrollExportedAt" },
-    { header: "Payroll Exported By", key: "payrollExportedBy" },
+    { header: "Payroll Status", key: "payrollStatus" },
+  ]);
+}
+
+export async function buildWorkerHoursSummaryCsv(filters) {
+  const allFilters = { ...filters, page: 1, limit: MAX_PAGE_LIMIT * 100 };
+  const { timesheets } = await listAdminTimesheets(allFilters);
+
+  const byWorker = new Map();
+  for (const row of timesheets) {
+    const key = row.workerId || row.workerStaffId || row.workerName || "unknown";
+    const current = byWorker.get(key) || {
+      workerName: row.workerName,
+      workerStaffId: row.workerStaffId,
+      shiftCount: 0,
+      totalActualHours: 0,
+      totalPayableHours: 0,
+      openShiftCount: 0,
+      pendingReviewCount: 0,
+    };
+
+    current.shiftCount += 1;
+    current.totalActualHours += Number(row.actualHours || 0);
+    current.totalPayableHours += Number(row.payableHours || 0);
+    if (row.status !== "completed") current.openShiftCount += 1;
+    if (row.reviewPending) current.pendingReviewCount += 1;
+
+    byWorker.set(key, current);
+  }
+
+  const rows = [...byWorker.values()].map((row) => ({
+    ...row,
+    totalActualHours: Number(row.totalActualHours.toFixed(2)),
+    totalPayableHours: Number(row.totalPayableHours.toFixed(2)),
+  }));
+
+  return buildCsvFromColumns(rows, [
+    { header: "Worker Name", key: "workerName" },
+    { header: "Staff ID", key: "workerStaffId" },
+    { header: "Shift Count", key: "shiftCount" },
+    { header: "Total Actual Hours", key: "totalActualHours" },
+    { header: "Total Payable Hours", key: "totalPayableHours" },
+    { header: "Open Shift Count", key: "openShiftCount" },
+    { header: "Pending Review Count", key: "pendingReviewCount" },
+  ]);
+}
+
+export async function buildHotelHoursSummaryCsv(filters) {
+  const allFilters = { ...filters, page: 1, limit: MAX_PAGE_LIMIT * 100 };
+  const { timesheets } = await listAdminTimesheets(allFilters);
+
+  const byHotel = new Map();
+  for (const row of timesheets) {
+    const key = row.workplaceName || "Unassigned";
+    const current = byHotel.get(key) || {
+      workplaceName: key,
+      shiftCount: 0,
+      totalActualHours: 0,
+      totalPayableHours: 0,
+      outsideGeofenceCount: 0,
+    };
+
+    current.shiftCount += 1;
+    current.totalActualHours += Number(row.actualHours || 0);
+    current.totalPayableHours += Number(row.payableHours || 0);
+    if (row.outsideGeofence) current.outsideGeofenceCount += 1;
+
+    byHotel.set(key, current);
+  }
+
+  const rows = [...byHotel.values()].map((row) => ({
+    ...row,
+    totalActualHours: Number(row.totalActualHours.toFixed(2)),
+    totalPayableHours: Number(row.totalPayableHours.toFixed(2)),
+  }));
+
+  return buildCsvFromColumns(rows, [
+    { header: "Workplace", key: "workplaceName" },
+    { header: "Shift Count", key: "shiftCount" },
+    { header: "Total Actual Hours", key: "totalActualHours" },
+    { header: "Total Payable Hours", key: "totalPayableHours" },
+    { header: "Outside Geofence Count", key: "outsideGeofenceCount" },
   ]);
 }

@@ -6,6 +6,7 @@ import {
   adminLoginController,
   adminMeController,
 } from "../controllers/adminAuthController.js";
+import { validateHotelsController } from "../controllers/adminHotelController.js";
 import {
   assignWorkerWorkplaceController,
   listAssignableWorkplacesController,
@@ -32,10 +33,13 @@ import {
   reopenPayrollExportBatchController,
   reissuePayrollExportBatchController,
   resolveTimesheetController,
+  bulkResolveTimesheetsController,
 } from "../controllers/adminTimesheetController.js";
 import {
   createAdminUserController,
+  listAdminAuditLogsController,
   listAdminUsersController,
+  resetAdminUserPasswordController,
   setAdminUserRoleController,
   setAdminUserStatusController,
 } from "../controllers/adminUserController.js";
@@ -58,6 +62,7 @@ export function createAdminRoutes() {
   router.get("/me", adminMeController);
 
   router.get("/dashboard", dashboardController);
+  router.get("/hotels/validate", validateHotelsController);
 
   router.get("/workers", listWorkersController);
   router.patch("/workers/:workerUserId/workplace", assignWorkerWorkplaceController);
@@ -67,6 +72,8 @@ export function createAdminRoutes() {
   router.post("/users", createAdminUserController);
   router.patch("/users/:userId/status", setAdminUserStatusController);
   router.patch("/users/:userId/role", setAdminUserRoleController);
+  router.post("/users/:userId/reset-password", resetAdminUserPasswordController);
+  router.get("/audit-logs", listAdminAuditLogsController);
 
   router.get("/pay-periods", listPayrollPeriodsController);
   router.post("/pay-periods", createPayrollPeriodController);
@@ -90,7 +97,9 @@ export function createAdminRoutes() {
   router.get("/timesheets/export/csv", exportTimesheetsCsvController);
   router.get("/timesheets/summary/payroll", payrollSummaryController);
   router.get("/timesheets", listTimesheetsController);
+  router.post("/timesheets/bulk-resolve", bulkResolveTimesheetsController);
   router.patch("/timesheets/:shiftId/resolve", resolveTimesheetController);
+  router.post("/timesheets/:shiftId/resolve", resolveTimesheetController);
   router.get("/timesheets/:shiftId", getTimesheetDetailController);
 
   return router;

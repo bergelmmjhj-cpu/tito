@@ -53,7 +53,11 @@ function normalizeGeofence(geofence) {
 
   return {
     workplaceId: geofence.workplaceId || null,
+    resolvedWorkplaceId: geofence.resolvedWorkplaceId || geofence.workplaceId || null,
     workplaceName: geofence.workplaceName || null,
+    resolvedWorkplaceName: geofence.resolvedWorkplaceName || geofence.workplaceName || null,
+    workplaceResolution: geofence.workplaceResolution || null,
+    reviewFlag: geofence.reviewFlag || null,
     businessTimeZone: geofence.businessTimeZone || null,
     radiusMeters:
       typeof geofence.radiusMeters === "number" && Number.isFinite(geofence.radiusMeters)
@@ -64,6 +68,9 @@ function normalizeGeofence(geofence) {
         ? geofence.distanceMeters
         : null,
     withinGeofence: typeof geofence.withinGeofence === "boolean" ? geofence.withinGeofence : null,
+    geofenceMatched: typeof geofence.geofenceMatched === "boolean" ? geofence.geofenceMatched : null,
+    assignedWorkplaceUsed:
+      typeof geofence.assignedWorkplaceUsed === "boolean" ? geofence.assignedWorkplaceUsed : null,
     enforcementEnabled:
       typeof geofence.enforcementEnabled === "boolean" ? geofence.enforcementEnabled : false,
   };
@@ -279,6 +286,56 @@ export async function getTimeLogsForShift(shiftId) {
   return result.rows.map(normalizeDbTimeLog);
 }
 
+export async function setShiftClockInGeofence(shiftId, geofencePatch = {}) {
+  if (!shiftId || typeof shiftId !== "string") {
+    throw new HttpError(400, "shiftId is required");
+  }
+
+  if (!geofencePatch || typeof geofencePatch !== "object") {
+    throw new HttpError(400, "geofencePatch is required");
+  }
+
+  if (!isDatabaseReady()) {
+    const db = await readDatabaseFromJson();
+    const logs = (db.timeLogs || []).filter((log) => log.shiftId === shiftId && log.actionType === "clock_in");
+    if (logs.length === 0) throw new HttpError(404, "Clock-in log not found");
+    logs.sort((a, b) => Date.parse(a.timestamp || "") - Date.parse(b.timestamp || ""));
+    const target = logs[0];
+    target.geofence = {
+      ...(target.geofence || {}),
+      ...normalizeGeofence(geofencePatch),
+    };
+    await writeDatabaseToJson(db);
+    return target;
+  }
+
+  const clockInLog = await query(
+    `SELECT id, geofence
+     FROM time_logs
+     WHERE shift_id = $1 AND action_type = 'clock_in'
+     ORDER BY timestamp ASC
+     LIMIT 1`,
+    [shiftId]
+  );
+
+  if (clockInLog.rows.length === 0) {
+    throw new HttpError(404, "Clock-in log not found");
+  }
+
+  const existing = safeJsonParse(clockInLog.rows[0].geofence, "geofence") || {};
+  const merged = {
+    ...existing,
+    ...normalizeGeofence(geofencePatch),
+  };
+
+  await query(`UPDATE time_logs SET geofence = $1 WHERE id = $2`, [JSON.stringify(merged), clockInLog.rows[0].id]);
+
+  return {
+    id: clockInLog.rows[0].id,
+    geofence: merged,
+  };
+}
+
 function ensureIsoTimestamp(value, label) {
   if (!value) throw new HttpError(400, `${label} is required`);
   const parsed = Date.parse(value);
@@ -336,7 +393,15 @@ function buildAdminResolutionLogs({
   const logs = [];
 
   if (reviewStatus || reviewNote) {
-    const statusText = reviewStatus === "follow_up_required" ? "Follow-up required" : "Reviewed";
+    const statusMap = {
+      approved: "Approved",
+      rejected: "Rejected",
+      needs_correction: "Needs correction",
+      pending: "Pending",
+      reviewed: "Approved",
+      follow_up_required: "Needs correction",
+    };
+    const statusText = statusMap[reviewStatus] || "Reviewed";
     logs.push({
       id: crypto.randomUUID(),
       userId: actorUserId,
@@ -445,8 +510,8 @@ function buildPayrollStateTransition(currentShift, actorUserId, eventTimestamp, 
     throw new HttpError(400, "Payroll status can only be changed on a closed shift");
   }
 
-  if (finalReviewStatus !== "reviewed") {
-    throw new HttpError(400, "Payroll status can only be changed after the shift is reviewed");
+  if (finalReviewStatus !== "approved") {
+    throw new HttpError(400, "Payroll status can only be changed after the shift is approved");
   }
 
   if (requestedPayrollStatus === "exported" && currentPayrollStatus !== "approved") {

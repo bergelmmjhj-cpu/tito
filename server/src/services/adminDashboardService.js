@@ -3,7 +3,20 @@ import { isDatabaseReady } from "../db/initialization.js";
 import { listWorkplacesFromCrm } from "../models/crmWorkplaceModel.js";
 import { isCrmPoolReady } from "../db/crmPool.js";
 
-const MISSING_CLOCKOUT_HOURS = 8;
+const OPEN_SHIFT_THRESHOLD_HOURS = Number(process.env.OPEN_SHIFT_THRESHOLD_HOURS || 8);
+const AUTO_CLOCK_OUT_HOURS = Number(process.env.AUTO_CLOCK_OUT_HOURS || 14);
+
+export function classifyOpenShiftAgeHours(ageHours, thresholdHours = OPEN_SHIFT_THRESHOLD_HOURS) {
+  if (!Number.isFinite(ageHours) || ageHours < 0) return "open";
+  return ageHours >= thresholdHours ? "missing_clock_out" : "open";
+}
+
+export function getDashboardThresholds() {
+  return {
+    openShiftThresholdHours: OPEN_SHIFT_THRESHOLD_HOURS,
+    autoClockOutHours: AUTO_CLOCK_OUT_HOURS,
+  };
+}
 
 async function safeQuery(sql, params = []) {
   try {
@@ -29,11 +42,22 @@ async function countClockedIn() {
   return rows?.[0]?.count ?? 0;
 }
 
+async function countOpenShifts() {
+  const rows = await safeQuery(
+    `SELECT COUNT(*)::int AS count FROM shifts
+     WHERE clock_out_at IS NULL
+       AND clock_in_at >= NOW() - ($1::text || ' hours')::interval`,
+    [OPEN_SHIFT_THRESHOLD_HOURS]
+  );
+  return rows?.[0]?.count ?? 0;
+}
+
 async function countMissingClockOuts() {
   const rows = await safeQuery(
     `SELECT COUNT(*)::int AS count FROM shifts
      WHERE clock_out_at IS NULL
-       AND clock_in_at < NOW() - INTERVAL '${MISSING_CLOCKOUT_HOURS} hours'`
+       AND clock_in_at < NOW() - ($1::text || ' hours')::interval`,
+    [OPEN_SHIFT_THRESHOLD_HOURS]
   );
   return rows?.[0]?.count ?? 0;
 }
@@ -74,9 +98,10 @@ async function countActiveWorkplaces() {
 
 async function sumHoursToday() {
   const rows = await safeQuery(
-    `SELECT COALESCE(SUM(actual_hours), 0)::numeric(10,2) AS total
+    `SELECT COALESCE(SUM(COALESCE(actual_hours, payable_hours, 0)), 0)::numeric(10,2) AS total
      FROM shifts
-     WHERE business_date = TO_CHAR(CURRENT_DATE, 'YYYY-MM-DD')`
+     WHERE DATE(clock_in_at AT TIME ZONE COALESCE(NULLIF(business_time_zone, ''), 'UTC'))
+         = DATE(NOW() AT TIME ZONE COALESCE(NULLIF(business_time_zone, ''), 'UTC'))`
   );
   return Number(rows?.[0]?.total ?? 0);
 }
@@ -94,6 +119,7 @@ export async function getAdminDashboardStats() {
   const [
     activeStaff,
     clockedIn,
+    openShifts,
     missingClockOuts,
     exceptionsToday,
     activeWorkplaces,
@@ -102,6 +128,7 @@ export async function getAdminDashboardStats() {
   ] = await Promise.all([
     countActiveWorkers(),
     countClockedIn(),
+    countOpenShifts(),
     countMissingClockOuts(),
     countExceptionsToday(),
     countActiveWorkplaces(),
@@ -112,12 +139,21 @@ export async function getAdminDashboardStats() {
   return {
     activeStaff,
     clockedIn,
-    openShifts: clockedIn,
+    openShifts,
     missingClockOuts,
     exceptionsToday,
     activeWorkplaces,
     hoursToday: Number(hoursToday.toFixed(2)),
     hoursThisWeek: Number(hoursThisWeek.toFixed(2)),
+    thresholds: {
+      openShiftThresholdHours: OPEN_SHIFT_THRESHOLD_HOURS,
+      autoClockOutHours: AUTO_CLOCK_OUT_HOURS,
+    },
+    tooltips: {
+      openShifts: `Open shifts are clocked-in shifts with no clock-out and elapsed time under ${OPEN_SHIFT_THRESHOLD_HOURS} hours.`,
+      missingClockOuts: `Missing clock-outs are open shifts at or beyond ${OPEN_SHIFT_THRESHOLD_HOURS} hours without clock-out.`,
+      hoursToday: "Hours Today sums shift hours by each shift's local business time zone date (UTC fallback).",
+    },
     generatedAt: new Date().toISOString(),
   };
 }

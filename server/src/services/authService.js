@@ -30,6 +30,7 @@ function sanitizeUser(user) {
     role: user.role,
     isActive: user.isActive !== false,
     assignedWorkplaceId: user.profile?.assignedWorkplaceId || null,
+    forcePasswordReset: user.forcePasswordReset === true,
   };
 }
 
@@ -72,6 +73,10 @@ function normalizeOptionalName(value, fallback) {
 function validatePassword(password, confirmPassword) {
   if (typeof password !== "string" || password.length < PASSWORD_MIN_LENGTH) {
     throw new HttpError(400, `Password must be at least ${PASSWORD_MIN_LENGTH} characters`);
+  }
+
+  if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+    throw new HttpError(400, "Password must include at least one letter and one number");
   }
 
   if (password !== confirmPassword) {
@@ -260,7 +265,11 @@ export async function login(identifier, password) {
   const user = await authenticateWithCredentials(identifier, password);
 
   const token = await createSession(user.id);
-  return { token, user: sanitizeUser(user) };
+  return {
+    token,
+    user: sanitizeUser(user),
+    requiresPasswordReset: user.forcePasswordReset === true,
+  };
 }
 
 export function buildGoogleAuthorizationUrl(origin, state) {
@@ -300,7 +309,11 @@ export async function loginAdmin(identifier, password) {
   }
 
   const token = await createSession(user.id);
-  return { token, user: sanitizeUser(user) };
+  return {
+    token,
+    user: sanitizeUser(user),
+    requiresPasswordReset: user.forcePasswordReset === true,
+  };
 }
 
 export async function registerWorker(payload = {}) {
