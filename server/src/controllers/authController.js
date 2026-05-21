@@ -59,9 +59,10 @@ function clearGoogleStateCookie(res, secure) {
   res.setHeader("Set-Cookie", parts.join("; "));
 }
 
-function buildAuthCompleteHtml({ token, error }) {
+export function buildAuthCompleteHtml({ token, error, role }) {
   const tokenLiteral = JSON.stringify(token || "");
   const errorLiteral = JSON.stringify(error || "");
+  const roleLiteral = JSON.stringify(role || "");
 
   return `<!doctype html>
 <html lang="en">
@@ -75,9 +76,11 @@ function buildAuthCompleteHtml({ token, error }) {
     <script>
       const token = ${tokenLiteral};
       const error = ${errorLiteral};
+      const role = ${roleLiteral};
       if (token) {
         window.localStorage.setItem("timeclock_token", token);
-        window.location.replace("/");
+        const nextPath = role === "admin" ? "/admin/" : (role === "worker" ? "/worker/" : "/");
+        window.location.replace(nextPath);
       } else {
         const target = new URL("/", window.location.origin);
         if (error) target.searchParams.set("authError", error);
@@ -183,7 +186,7 @@ export async function googleCallbackController(req, res) {
     }
 
     const result = await loginWithGoogleAuthorizationCode(code, getRequestOrigin(req));
-    res.type("html").send(buildAuthCompleteHtml({ token: result.token }));
+    res.type("html").send(buildAuthCompleteHtml({ token: result.token, role: result.user?.role }));
   } catch (error) {
     const err = toHttpError(error);
     res.status(err.status).type("html").send(buildAuthCompleteHtml({ error: err.message }));
